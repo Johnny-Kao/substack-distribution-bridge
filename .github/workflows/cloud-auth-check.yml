@@ -28,13 +28,13 @@ jobs:
           if not base.startswith("https://") or not key:
               print("Cloud session check unavailable: read-only bridge settings missing.")
               sys.exit(1)
-          request=Request(base+"/v1/session-check",headers={"Authorization":"Bearer "+key,"Accept":"application/json"})
+          request=Request(base+"/v1/session-check",headers={"Authorization":"Bearer "+key,"Accept":"application/json","User-Agent":"Mozilla/5.0 (compatible; CloudVerification/1.0)"})
           try:
               with urlopen(request,timeout=20) as resp:
                   data=json.load(resp)
                   status=resp.status
           except HTTPError as err:
-              print("Cloud session check failed; Worker returned HTTP "+str(err.code)+".")
+              print("Cloud session check failed; HTTP "+str(err.code)+", content-type="+str(err.headers.get("Content-Type","unknown"))+", mitigation="+str(err.headers.get("cf-mitigated","none"))+".")
               sys.exit(1)
           except (URLError,TimeoutError,ValueError):
               print("Cloud session check failed: network or unreadable response.")
