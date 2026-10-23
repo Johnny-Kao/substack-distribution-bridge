@@ -22,6 +22,13 @@ export async function runAuthorizedPostAction(env,{target,kind,body="",postId,ap
     browser=await puppeteer.launch(env.BROWSER);
     const page=await browser.newPage();
     await page.setCookie({name:"substack.sid",value:env.SUBSTACK_SESSION.trim(),domain:".substack.com",path:"/",httpOnly:true,secure:true});
+    await page.goto("https://substack.com/",{waitUntil:"domcontentloaded",timeout:18000});
+    const owner=await page.evaluate(async()=>{
+      const r=await fetch("/api/v1/user/profile/self",{credentials:"include"});
+      const d=r.ok?await r.json().catch(()=>null):null;
+      return Number.isSafeInteger(d?.id)?d.id:null;
+    });
+    if(!owner)throw Error("cloud_comment_account_unverified");
     await page.goto("https://"+loc.host+"/",{waitUntil:"domcontentloaded",timeout:18000});
     const verify=()=>page.evaluate(async args=>{
       const response=await fetch("/api/v1/posts/by-id/"+args.id,{credentials:"include",headers:{"accept":"application/json"}});
@@ -32,12 +39,6 @@ export async function runAuthorizedPostAction(env,{target,kind,body="",postId,ap
     },{id:postId});
     const before=await verify();
     if(!before.ok)throw Error("unverified_account_or_post");
-    const owner=await page.evaluate(async()=>{
-      const r=await fetch("https://substack.com/api/v1/user/profile/self",{credentials:"include"});
-      const d=r.ok?await r.json().catch(()=>null):null;
-      return Number.isSafeInteger(d?.id)?d.id:null;
-    });
-    if(!owner)throw Error("cloud_comment_account_unverified");
     const comments=()=>page.evaluate(async id=>{
       const r=await fetch("/api/v1/post/"+id+"/comments?token=&all_comments=true&sort=most_recent_first",{credentials:"include"});
       return r.ok?{ok:true,data:await r.json().catch(()=>null)}:{ok:false};
