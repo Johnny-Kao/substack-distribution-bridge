@@ -1,7 +1,7 @@
 // Private write control plane. No GitHub Actions credential can invoke these routes.
 // Fail closed: unknown errors halt all execution until owner explicitly resumes.
 import {ownerSubjectProbe} from "./subject.js";
-import {verifyCloudPostLike} from "./cloud_substack_writes.js";
+import {verifyCloudPostLike,runAuthorizedPostAction} from "./cloud_substack_writes.js";
 import {withBrowserBudget} from "./browser_budget.js";
 const reply=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 const kinds=new Set(["like","comment","note"]);
@@ -37,7 +37,7 @@ async function innerWriteHandler(request,env,url){
  if(url.pathname==="/v1/write/subject-probe")return ownerSubjectProbe(request,env);
  if(url.pathname==="/v1/write/policy"&&request.method==="GET"){
   const p=await halted(db);
-   return reply({halted:!!p.halted,reason:p.reason,limits,auto_like_max:5,approval_for:["comment","note"],write_enabled:false,execution_environment:"none",requires_external_authorized_substack_write_access:true});
+   return reply({halted:!!p.halted,reason:p.reason,limits,auto_like_max:5,approval_for:["comment","note"],write_enabled:true,execution_environment:"cloudflare_browser",requires_exact_approved_proposal:true});
  }
  if(url.pathname==="/v1/write/check-existing-like"&&request.method==="POST"){
    const input=await request.json().catch(()=>null);
@@ -134,7 +134,38 @@ async function innerWriteHandler(request,env,url){
   return reply({halted:!!state.halted,proposals:rows.results});
  }
  if(url.pathname==="/v1/write/execute"&&request.method==="POST"){
-   return reply({error:"no_verified_cloud_only_substack_write_path",publication_performed:false},423);
+   if((await halted(db))?.halted)return reply({error:"write_operations_halted",publication_performed:false},423);
+   const input=await request.json().catch(()=>null);
+   if(!goodId(input?.id)||typeof input?.hash!=="string"||!/^[a-f0-9]{64}$/.test(input.hash)||!Number.isSafeInteger(input.post_id)||input.post_id<=0)return reply({error:"invalid_execution_proof",publication_performed:false},400);
+   const row=await db.prepare("SELECT id,kind,target,body,body_hash,state,origin FROM proposals WHERE id=? AND body_hash=?").bind(input.id,input.hash).first();
+   if(!row||row.state!=="approved"||row.kind==="note"||!validate(row))return reply({error:"exact_approved_proposal_required",publication_performed:false},409);
+   if(await count(db,row.kind)>=limits[row.kind])return reply({error:"daily_quota_reached",publication_performed:false},429);
+   const already=await db.prepare("SELECT id,status,public_id FROM operations WHERE id=? OR (kind=? AND target=? AND approved_hash=?) LIMIT 1").bind(row.id,row.kind,row.target,row.body_hash).first();
+   if(already)return reply({error:"duplicate_or_uncertain_operation",status:already.status,publication_performed:false},409);
+   // Unique operation ID is the single-use execution lock. Atomic D1 batch
+   // means concurrent executions cannot both acquire the same proposal.
+   await db.batch([
+     db.prepare("INSERT INTO operations(id,kind,target,approved_hash,status) VALUES(?,?,?,?,'executing')").bind(row.id,row.kind,row.target,row.body_hash),
+     db.prepare("UPDATE proposals SET state='executing' WHERE id=? AND state='approved' AND body_hash=?").bind(row.id,row.body_hash)
+   ]);
+   try{
+     const outcome=await withBrowserBudget(db,"approved_"+row.kind,()=>runAuthorizedPostAction(env,{target:row.target,kind:row.kind,body:row.body,postId:input.post_id,approved:true}));
+     if(!outcome?.ok||!outcome.verified)throw Error("cloud_write_unverified");
+     await db.batch([
+       db.prepare("UPDATE operations SET status='succeeded',public_id=? WHERE id=? AND status='executing'").bind(outcome.public_id||null,row.id),
+       db.prepare("UPDATE proposals SET state='executed' WHERE id=? AND state='executing'").bind(row.id)
+     ]);
+     return reply({ok:true,kind:row.kind,status:outcome.status,verified:true,publication_performed:outcome.publication_performed,public_id:outcome.public_id||null});
+   }catch(err){
+     // A network failure after POST may mean the comment exists. Never retry.
+     await db.batch([
+       db.prepare("UPDATE operations SET status='unknown' WHERE id=? AND status='executing'").bind(row.id),
+       db.prepare("UPDATE proposals SET state='unknown' WHERE id=? AND state='executing'").bind(row.id)
+     ]);
+     await stop(db,"ambiguous_cloud_public_write");
+     const code=String(err?.message||"unknown").replace(/[^a-zA-Z0-9_:-]/g,"_").slice(0,65);
+     return reply({error:"write_halted_pending_manual_readback",code,publication_performed:null},503);
+   }
  }
  if(url.pathname==="/v1/write/halt"&&request.method==="POST"){
   await stop(db,"owner_stop");return reply({ok:true,halted:true});
