@@ -10,19 +10,19 @@ concurrency:
   cancel-in-progress: false
 jobs:
   qc:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Deterministic QC unit tests
         run: python -m unittest discover -s tests -v
       - name: Write authorization and readback tests (no secrets)
         run: node --test tests/write_policy.test.mjs tests/executor.test.mjs
   discover:
     needs: qc
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Random scheduling offset
         run: sleep $((RANDOM % 181))
       - name: Keyword discovery and private ingest
