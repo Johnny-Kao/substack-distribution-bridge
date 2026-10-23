@@ -5,7 +5,7 @@ import { runSubjectDiscovery } from './subject_discovery.js';
 import {globalContentStep} from './global_content.js';
 import {screenGlobalCandidates} from './global_screening.js';
 import {readOneGlobalArticle} from './global_article.js';
-import {verifyCloudPostLike,verifyCloudCommentReadback,runAuthorizedPostAction} from './cloud_substack_writes.js';
+import {verifyCloudPostLike,verifyCloudCommentReadback,runAuthorizedPostAction,verifyExactCloudComment} from './cloud_substack_writes.js';
 import {withBrowserBudget} from './browser_budget.js';
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 const allow=(req,env)=>!!env.BRIDGE_KEY&&(req.headers.get("Authorization")||"")==="Bearer "+env.BRIDGE_KEY;
@@ -18,6 +18,31 @@ export default {
   if(url.pathname==="/health")return json({ok:true,mode:"github_cloudflare_only",public_write_enabled:false});
   if(url.pathname.startsWith("/v1/write/"))return writeHandler(req,env,url);
   if(!allow(req,env))return json({error:"unauthorized"},401);
+  if(url.pathname==="/v1/global/verify-approved-once"&&req.method==="POST"){
+    try{
+      const expected="9b368097d3afd581ca4be17e3a0d3323e205ff9c168278d2eee864384117f608";
+      const raw=await req.json();
+      if(raw?.v!==1||typeof raw.key!=="string"||typeof raw.iv!=="string"||typeof raw.data!=="string")return json({error:"invalid_envelope"},400);
+      const fromB64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+      const pem=env.APPROVED_COMMENT_PRIVATE_PEM;
+      if(typeof pem!=="string")return json({error:"sealed_secret_missing"},503);
+      const der=fromB64(pem.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\s/g,""));
+      const privateKey=await crypto.subtle.importKey("pkcs8",der,{name:"RSA-OAEP",hash:"SHA-256"},false,["decrypt"]);
+      const rawKey=await crypto.subtle.decrypt({name:"RSA-OAEP"},privateKey,fromB64(raw.key));
+      const aes=await crypto.subtle.importKey("raw",rawKey,{name:"AES-GCM"},false,["decrypt"]);
+      const plaintext=await crypto.subtle.decrypt({name:"AES-GCM",iv:fromB64(raw.iv)},aes,fromB64(raw.data));
+      const digest=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",plaintext))).map(x=>x.toString(16).padStart(2,"0")).join("");
+      if(digest!==expected)return json({error:"approval_hash_mismatch"},403);
+      const item=JSON.parse(new TextDecoder().decode(plaintext));
+      try{
+        const result=await withBrowserBudget(env.DB,"sealed_comment_readback",()=>verifyExactCloudComment(env,{target:item.target,postId:item.post_id,body:item.body}));
+        return json(result);
+      }catch(e){
+        const code=String(e?.message||"unknown").replace(/[^a-zA-Z0-9_:-]/g,"_").slice(0,65);
+        return json({error:"cloud_exact_comment_readback_failed",code,publication_performed:false},code==="browser_free_budget_or_pacing"?429:503);
+      }
+    }catch(_){return json({error:"approval_envelope_invalid",publication_performed:false},400);}
+  }
   // Narrow one-shot allowance: only the user's explicitly approved, pinned
   // SHA-256 payload. BRIDGE_KEY cannot make arbitrary Like/Comment requests.
   if(url.pathname==="/v1/global/approved-once"&&req.method==="POST"){
