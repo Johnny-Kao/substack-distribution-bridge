@@ -1,0 +1,46 @@
+name: Execute exact approved comment once (cloud only)
+on:
+  push:
+    branches: [master]
+    paths:
+      - "private_envelopes/approved_comment.enc.json"
+permissions:
+  contents: read
+concurrency:
+  group: exact-approved-substack-comment-once
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    env:
+      BRIDGE_URL: ${{ vars.BRIDGE_URL }}
+      BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Deliver one encrypted user-approved action to Cloudflare (no plaintext in GitHub)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${BRIDGE_URL:-}" && test -n "${BRIDGE_KEY:-}"
+          code=$(curl --retry 0 --silent --show-error --max-time 100 \
+            -o /tmp/comment-response.json -w '%{http_code}' \
+            -X POST "${BRIDGE_URL%/}/v1/global/approved-once" \
+            -H "Authorization: Bearer $BRIDGE_KEY" \
+            -H "Content-Type: application/json" \
+            --data-binary @private_envelopes/approved_comment.enc.json)
+          python3 - "$code" <<'PY'
+          import json,sys
+          try:
+              response=json.load(open("/tmp/comment-response.json",encoding="utf-8"))
+          except Exception:
+              print("Cloud comment confirmation: FAIL - malformed server response")
+              sys.exit(1)
+          status=int(sys.argv[1])
+          ok=status==200 and response.get("ok") is True and response.get("verified") is True and response.get("status") in ("commented","already_commented") and bool(response.get("public_id"))
+          print("One-time cloud comment exact-author readback: "+("PASS" if ok else "FAIL")+", HTTP "+str(status))
+          if not ok:
+              print("Server result category: "+str(response.get("error","unverified"))[:64])
+              print("No retries: ambiguous posting must be investigated before further writes.")
+              sys.exit(1)
+          PY
