@@ -11,7 +11,8 @@ ROOT=Path(__file__).resolve().parents[1]
 BASE="https://substack-distribution-bridge.at12885.workers.dev"
 KEY_FILE=ROOT/".cache/runner_key"
 LOCAL_ROOT=ROOT.parent
-sys.path.insert(0,str(LOCAL_ROOT/"src"))
+source_dir=ROOT/"src" if (ROOT/"src"/"substack_ops").is_dir() else LOCAL_ROOT/"src"
+sys.path.insert(0,str(source_dir))
 from substack_ops.client import SubstackClient
 
 def call(client,path,body=None):
@@ -31,10 +32,29 @@ def post_id_for(c,url):
     return int(response.json()["id"]),f"https://{p.hostname}"
 
 def known_like(c,pid):
-    p=c.http.get(f"https://substack.com/api/v1/reader/feed/profile/{c.cfg.user_id}",params={"types[]":"like","limit":50})
-    p.raise_for_status()
-    data=p.json()
-    return any(int(x.get("post",{}).get("id") or 0)==pid for x in data.get("items",[]))
+    cursor=None
+    for _ in range(5):
+        params={"types[]":"like","limit":50}
+        if cursor:params["cursor"]=cursor
+        p=c.http.get(f"https://substack.com/api/v1/reader/feed/profile/{c.cfg.user_id}",params=params)
+        p.raise_for_status()
+        data=p.json()
+        if not isinstance(data.get("items"),list):
+            raise RuntimeError("invalid_likes_feed")
+        if any(int((x.get("post") or {}).get("id") or 0)==pid for x in data["items"]):
+            return True
+        cursor=data.get("nextCursor")
+        if not cursor:return False
+    raise RuntimeError("likes_feed_incomplete")
+
+def has_exact_record(payload,record_id,body=None):
+    if isinstance(payload,list):
+        return any(has_exact_record(x,record_id,body) for x in payload)
+    if not isinstance(payload,dict):
+        return False
+    if str(payload.get("id"))==str(record_id) and (body is None or payload.get("body")==body):
+        return True
+    return any(has_exact_record(x,record_id,body) for x in payload.values() if isinstance(x,(dict,list)))
 
 def verified_job(c,job):
     kind,target,body=job["kind"],job["target"],job["body"]
@@ -52,7 +72,7 @@ def verified_job(c,job):
         cid=result.get("id")
         if not cid:raise RuntimeError("comment_result_without_id")
         comments=c.get_comments(post_id=pid,pub=pub)
-        if str(cid) not in json.dumps(comments):raise RuntimeError("comment_readback_unverified")
+        if not has_exact_record(comments,cid,body):raise RuntimeError("comment_readback_unverified")
         return str(cid)
     if kind=="note":
         if target!="https://johnnykao.substack.com/":raise ValueError("invalid_note_target")
@@ -60,7 +80,7 @@ def verified_job(c,job):
         nid=result.get("id")
         if not nid:raise RuntimeError("note_result_without_id")
         published=c.list_notes(limit=40)
-        if str(nid) not in json.dumps(published):raise RuntimeError("note_readback_unverified")
+        if not has_exact_record(published,nid):raise RuntimeError("note_readback_unverified")
         return str(nid)
     raise ValueError("invalid_operation")
 
@@ -68,7 +88,11 @@ def main():
     key=KEY_FILE.read_text().strip()
     with httpx.Client(timeout=35,headers={"Authorization":"Bearer "+key}) as api:
         if "--check" in sys.argv:
-            print(json.dumps(call(api,"/v1/runner/health")))
+            health=call(api,"/v1/runner/health")
+            with SubstackClient.create() as c:
+                profile=c.http.get("https://substack.com/api/v1/user/profile/self")
+                profile.raise_for_status()
+            print(json.dumps({"runner":health.get("runner") is True,"local_substack_authenticated":True}))
             return
         msg=call(api,"/v1/runner/next",{})
         job=msg.get("job")

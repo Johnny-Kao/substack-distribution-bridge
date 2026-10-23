@@ -17,6 +17,8 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Write authorization and readback tests (no secrets)
         run: node --test tests/write_policy.test.mjs tests/executor.test.mjs tests/runner.test.mjs
+      - name: M5 runner syntax check (no secrets)
+        run: python -m py_compile scripts/local_runner.py scripts/install_m5_runner.py
   discover:
     needs: qc
     runs-on: ubuntu-24.04
