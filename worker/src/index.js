@@ -5,7 +5,7 @@ import { runSubjectDiscovery } from './subject_discovery.js';
 import {globalContentStep} from './global_content.js';
 import {screenGlobalCandidates} from './global_screening.js';
 import {readOneGlobalArticle} from './global_article.js';
-import {verifyCloudPostLike} from './cloud_substack_writes.js';
+import {verifyCloudPostLike,verifyCloudCommentReadback} from './cloud_substack_writes.js';
 import {withBrowserBudget} from './browser_budget.js';
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 const allow=(req,env)=>!!env.BRIDGE_KEY&&(req.headers.get("Authorization")||"")==="Bearer "+env.BRIDGE_KEY;
@@ -23,6 +23,17 @@ export default {
    if(url.pathname==="/v1/global/step")return globalContentStep(req,env);
    if(url.pathname==="/v1/global/read")return readOneGlobalArticle(req,env);
    if(url.pathname==="/v1/global/screen"&&req.method==="POST")return json(await screenGlobalCandidates(env));
+   if(url.pathname==="/v1/global/verify-comment-readback"&&req.method==="POST"){
+    const row=await env.DB.prepare("SELECT url,id FROM global_posts WHERE full_read_at IS NOT NULL ORDER BY full_read_at DESC LIMIT 1").first();
+    if(!row)return json({error:"no_private_article_for_comment_probe",publication_performed:false},503);
+    try{
+      const result=await withBrowserBudget(env.DB,"cloud_comment_probe",()=>verifyCloudCommentReadback(env,{target:row.url,postId:row.id}));
+      return json(result);
+    }catch(err){
+      const code=String(err?.message||"unknown").replace(/[^a-zA-Z0-9_:-]/g,"_").slice(0,65);
+      return json({error:"cloud_comment_probe_failed",code,publication_performed:false},code==="browser_free_budget_or_pacing"?429:503);
+    }
+   }
    if(url.pathname==="/v1/global/verify-cloud-session"&&req.method==="POST"){
     // Read-only integration probe. Article identity remains private in D1.
     const row=await env.DB.prepare("SELECT url,id FROM global_posts WHERE full_read_at IS NOT NULL ORDER BY full_read_at DESC LIMIT 1").first();
