@@ -21,9 +21,18 @@ test("config flag cannot silently reactivate cloud writes",async()=>{
  assert.equal(r.status,423);
  assert.equal((await r.json()).error,"no_verified_cloud_only_substack_write_path");
 });
-test("private readback cannot be misrepresented as available",async()=>{
+test("private Like readback rejects missing target without browser access",async()=>{
  const r=await writeHandler(req("check-existing-like",env.OWNER_WRITE_KEY,{}),env,new URL(base+"check-existing-like"));
+ assert.equal(r.status,400);
+ assert.equal((await r.json()).error,"invalid_like_check_target");
+});
+test("private Like check never reports success without a working cloud browser",async()=>{
+ const r=await writeHandler(req("check-existing-like",env.OWNER_WRITE_KEY,{target:"https://example-publication.substack.com/p/a-valid-article",post_id:123456789}),env,new URL(base+"check-existing-like"));
  assert.equal(r.status,503);
+ const result=await r.json();
+ assert.equal(result.error,"cloud_like_check_failed");
+ assert.equal(result.verified,false);
+ assert.equal(result.publication_performed,false);
 });
 test("invalid proposal is rejected without publishing",async()=>{
  const r=await writeHandler(req("dry-run",env.OWNER_WRITE_KEY,{id:"proposal_123456",kind:"note",target:"https://not-substack.example/test",body:"Test content",origin:"manual"}),env,new URL(base+"dry-run"));
