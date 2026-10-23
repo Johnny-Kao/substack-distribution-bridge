@@ -16,7 +16,7 @@ jobs:
       - name: Deterministic QC unit tests
         run: python -m unittest discover -s tests -v
       - name: Write authorization and readback tests (no secrets)
-        run: node --test tests/write_policy.test.mjs tests/executor.test.mjs
+        run: node --test tests/write_policy.test.mjs tests/executor.test.mjs tests/runner.test.mjs
   discover:
     needs: qc
     runs-on: ubuntu-24.04

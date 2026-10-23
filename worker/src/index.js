@@ -1,5 +1,6 @@
 // Public code, private data. No public workflow writes private candidate details to GitHub.
 import { writeHandler } from './writes.js';
+import { runnerHandler } from './runner.js';
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 const allow=(req,env)=>!!env.BRIDGE_KEY&&(req.headers.get("Authorization")||"")==="Bearer "+env.BRIDGE_KEY;
 async function setting(env,key,fallback){const r=await env.DB.prepare("SELECT value FROM settings WHERE key=?").bind(key).first();return r?.value?JSON.parse(r.value):fallback;}
@@ -10,6 +11,7 @@ export default {
   const url=new URL(req.url);
   if(url.pathname==="/health")return json({ok:true,mode:"discovery_and_private_write_staging"});
   if(url.pathname.startsWith("/v1/write/"))return writeHandler(req,env,url);
+  if(url.pathname.startsWith("/v1/runner/"))return runnerHandler(req,env,url);
   if(!allow(req,env))return json({error:"unauthorized"},401);
   if(url.pathname==="/v1/plan"&&req.method==="GET"){
    const sources=await setting(env,"sources",[]);
