@@ -22,6 +22,15 @@ def execute():
           ", new="+str(int(result.get("new_posts",0)))+
           ", review candidates="+str(int(result.get("prequalified",0)))+
           ", total stored="+str(int(result.get("stored_total",0)))+".")
+    try:
+        screened=get_json(base+"/v1/global/screen",headers,payload={},timeout=55)
+        if screened.get("ok") is not True:
+            print("Private semantic screening rejected the result.",file=sys.stderr)
+            return 1
+        print("Private semantic screening completed; reviewed="+str(int(screened.get("reviewed",0)))+".")
+    except (HTTPError,URLError,TimeoutError,ValueError):
+        print("Private semantic screening deferred or unavailable.",file=sys.stderr)
+        return 1
     return 0
 
 if __name__=="__main__":

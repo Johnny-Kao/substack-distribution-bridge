@@ -3,6 +3,7 @@ import { writeHandler } from './writes.js';
 import { feedHandler } from './feed.js';
 import { runSubjectDiscovery } from './subject_discovery.js';
 import {globalContentStep} from './global_content.js';
+import {screenGlobalCandidates} from './global_screening.js';
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 const allow=(req,env)=>!!env.BRIDGE_KEY&&(req.headers.get("Authorization")||"")==="Bearer "+env.BRIDGE_KEY;
 async function setting(env,key,fallback){const r=await env.DB.prepare("SELECT value FROM settings WHERE key=?").bind(key).first();return r?.value?JSON.parse(r.value):fallback;}
@@ -17,6 +18,7 @@ export default {
   if(url.pathname==="/v1/source-feed")return feedHandler(req,env);
   if(url.pathname==="/v1/subject/step")return runSubjectDiscovery(req,env);
    if(url.pathname==="/v1/global/step")return globalContentStep(req,env);
+   if(url.pathname==="/v1/global/screen"&&req.method==="POST")return json(await screenGlobalCandidates(env));
   if(url.pathname==="/v1/plan"&&req.method==="GET"){
    const configured=await setting(env,"sources",[]);
    const fixedSources=Array.isArray(configured)?configured:[];
