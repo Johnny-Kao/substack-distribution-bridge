@@ -15,8 +15,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Deterministic QC unit tests
         run: python -m unittest discover -s tests -v
-      - name: Write authorization and fail-closed tests (no secrets)
-        run: node --test tests/write_policy.test.mjs
+      - name: Write authorization and readback tests (no secrets)
+        run: node --test tests/write_policy.test.mjs tests/executor.test.mjs
   discover:
     needs: qc
     runs-on: ubuntu-latest

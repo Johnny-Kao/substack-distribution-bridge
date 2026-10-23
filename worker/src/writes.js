@@ -1,4 +1,5 @@
 // Private write control plane. No GitHub Actions credential can invoke these routes.
+import {performVerifiedWrite,existingLikeStatus} from "./executor.js";
 // Fail closed: unknown errors halt all execution until owner explicitly resumes.
 const reply=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 const kinds=new Set(["like","comment","note"]);
@@ -34,6 +35,13 @@ async function innerWriteHandler(request,env,url){
  if(url.pathname==="/v1/write/policy"&&request.method==="GET"){
   const p=await halted(db);
   return reply({halted:!!p.halted,reason:p.reason,limits,auto_like_max:5,approval_for:["comment","note"],write_enabled:env.ENABLE_LIVE_WRITES==="true"});
+ }
+ if(url.pathname==="/v1/write/check-existing-like"&&request.method==="POST"){
+  if((await halted(db))?.halted)return reply({error:"write_operations_halted"},423);
+  const input=await request.json().catch(()=>null);
+  if(!goodTarget(input?.target))return reply({error:"invalid_target"},400);
+  const value=await existingLikeStatus(env,input.target);
+  return reply({ok:true,...value,publication_performed:false});
  }
  if(url.pathname==="/v1/write/dry-run"&&request.method==="POST"){
   const input=await request.json().catch(()=>null);
@@ -80,6 +88,7 @@ async function innerWriteHandler(request,env,url){
   const p=await halted(db);if(p.halted)return reply({error:"write_operations_halted"},423);
   const input=await request.json().catch(()=>null);
   if(!input||!Array.isArray(input.items)||input.items.length<1||input.items.length>10)return reply({error:"invalid_batch"},400);
+  if(new Set(input.items.map(x=>x?.id)).size!==input.items.length)return reply({error:"duplicate_approval_ids"},400);
   // All approval items pin id AND exact hash. No target or content substitution.
   for(const item of input.items){
     if(!goodId(item?.id)||typeof item.hash!=="string"||!/^[a-f0-9]{64}$/.test(item.hash))return reply({error:"invalid_approval"},400);
@@ -95,10 +104,31 @@ async function innerWriteHandler(request,env,url){
   return reply({halted:!!state.halted,proposals:rows.results});
  }
  if(url.pathname==="/v1/write/execute"&&request.method==="POST"){
-  // No live execution until separately verified with real authenticated readback.
-  // This is intentionally NOT bypassed by having a valid write credential.
   if(env.ENABLE_LIVE_WRITES!=="true")return reply({error:"live_writes_disabled"},423);
-  return reply({error:"executor_not_yet_validated"},501);
+   if((await halted(db))?.halted)return reply({error:"write_operations_halted"},423);
+   const input=await request.json().catch(()=>null);
+   if(!goodId(input?.id))return reply({error:"invalid_operation_id"},400);
+   const row=await db.prepare("SELECT * FROM proposals WHERE id=?").bind(input.id).first();
+   if(!row||row.state!=="approved")return reply({error:"not_approved"},403);
+   if(row.kind==="like"&&row.origin==="qc_auto")return reply({error:"automatic_qc_not_yet_proven"},423);
+   const existing=await db.prepare("SELECT id FROM operations WHERE kind=? AND target=? AND status IN ('executing','succeeded','unknown')").bind(row.kind,row.target).first();
+   if(existing)return reply({error:"target_already_handled"},409);
+   const max=limits[row.kind];
+   // Quota and unique operation claim happen in one serialized D1 statement.
+   const claim=await db.prepare("INSERT OR IGNORE INTO operations(id,kind,target,approved_hash,status) SELECT ?,?,?,?,'executing' WHERE (SELECT COUNT(*) FROM operations WHERE kind=? AND status IN ('executing','succeeded','unknown') AND DATE(created_at,'+9 hours')=DATE('now','+9 hours'))<?")
+    .bind(row.id,row.kind,row.target,row.body_hash,row.kind,max).run();
+   if(!claim.meta?.changes)return reply({error:"already_claimed_or_daily_cap"},409);
+   try{
+    const result=await performVerifiedWrite(env,row);
+    if(!result.verified)throw Error("upstream_result_unverified");
+    await db.prepare("UPDATE operations SET status='succeeded',public_id=? WHERE id=? AND status='executing'").bind(result.public_id,row.id).run();
+    await db.prepare("UPDATE proposals SET state='sent' WHERE id=? AND state='approved'").bind(row.id).run();
+    return reply({ok:true,verified:true,operation_id:row.id,public_id:result.public_id,already_existed:!!result.already_existed});
+   }catch(_error){
+    await db.prepare("UPDATE operations SET status='unknown' WHERE id=? AND status='executing'").bind(row.id).run();
+    await stop(db,"upstream_write_error_or_unverified");
+    return reply({error:"operation_unknown_and_halted",operation_id:row.id},503);
+   }
  }
  if(url.pathname==="/v1/write/halt"&&request.method==="POST"){
   await stop(db,"owner_stop");return reply({ok:true,halted:true});
@@ -113,7 +143,8 @@ async function innerWriteHandler(request,env,url){
 export async function writeHandler(request,env,url){
  try{return await innerWriteHandler(request,env,url);}
  catch(_error){
-  try{await stop(env.DB,"unexpected_write_control_error");}catch{}
+  const code=String(_error?.message||"unknown").replace(/[^a-zA-Z0-9_:-]/g,"_").slice(0,75);
+  try{await stop(env.DB,"write_control_error:"+code);}catch{}
   return reply({error:"write_control_halted"},503);
  }
 }
