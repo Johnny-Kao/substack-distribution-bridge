@@ -37,11 +37,20 @@ async function innerWriteHandler(request,env,url){
   return reply({halted:!!p.halted,reason:p.reason,limits,auto_like_max:5,approval_for:["comment","note"],write_enabled:env.ENABLE_LIVE_WRITES==="true"});
  }
  if(url.pathname==="/v1/write/check-existing-like"&&request.method==="POST"){
-  if((await halted(db))?.halted)return reply({error:"write_operations_halted"},423);
+  const cooling=await db.prepare("SELECT value FROM settings WHERE key='like_probe_cooldown_until'").first();
+  if(cooling?.value&&Date.now()<Number(cooling.value))return reply({error:"upstream_cooldown_active"},429);
   const input=await request.json().catch(()=>null);
   if(!goodTarget(input?.target))return reply({error:"invalid_target"},400);
-  const value=await existingLikeStatus(env,input.target);
-  return reply({ok:true,...value,publication_performed:false});
+  try {
+   const value=await existingLikeStatus(env,input.target);
+   return reply({ok:true,...value,publication_performed:false});
+  } catch(e) {
+   const reason=String(e.message||"unknown").replace(/[^a-zA-Z0-9_:]/g,"_").slice(0,65);
+   if(reason.endsWith("_http_429")){
+    await db.prepare("INSERT INTO settings(key,value) VALUES('like_probe_cooldown_until',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(String(Date.now()+21600000)).run();
+   }
+   return reply({error:"read_probe_failed",reason},502);
+  }
  }
  if(url.pathname==="/v1/write/dry-run"&&request.method==="POST"){
   const input=await request.json().catch(()=>null);

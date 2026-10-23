@@ -17,8 +17,11 @@ function headers(env,origin,json=false){
 }
 async function request(env,url,origin,body){
  checkedURL(url);
- const r=await fetch(url,{method:body===undefined?"GET":"POST",headers:headers(env,origin,body!==undefined),body:body===undefined?undefined:JSON.stringify(body),redirect:"error",signal:AbortSignal.timeout(15000)});
- if(!r.ok)throw Error("upstream_http_"+r.status);
+ const r=await fetch(url,{method:body===undefined?"GET":"POST",headers:headers(env,origin,body!==undefined),body:body===undefined?undefined:JSON.stringify(body),redirect:"manual",signal:AbortSignal.timeout(15000)});
+ if(!r.ok){
+  const label=new URL(url).pathname.startsWith("/api/v1/user/")?"profile":new URL(url).pathname.startsWith("/api/v1/reader/feed/")?"likes_feed":"post_metadata";
+  throw Error("upstream_"+label+"_http_"+r.status);
+ }
  return r.json();
 }
 async function ownUser(env){
