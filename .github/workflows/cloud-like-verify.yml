@@ -1,0 +1,86 @@
+name: Cloud-only Substack Like verification
+on:
+  push:
+    branches: [master]
+    paths:
+      - "worker/**"
+      - "tests/cloud_like.test.mjs"
+      - ".github/workflows/cloud-like-verify.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: substack-cloud-like-verification
+  cancel-in-progress: false
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install declared Worker dependencies
+        run: npm install --prefix worker --no-audit --no-fund
+      - name: Run JavaScript tests
+        run: node --test tests/*.test.mjs
+      - name: Run Python tests
+        run: python3 -m unittest discover -s tests -q
+      - name: Compile Cloudflare Worker without deploying
+        working-directory: worker
+        run: npx wrangler deploy --dry-run --outdir=./.wrangler-verify
+  deploy-and-readback:
+    needs: [test]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BRIDGE_URL: ${{ vars.BRIDGE_URL }}
+      BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Ensure cloud credentials exist; never use local computer
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+            echo "::error::Cloudflare deployment secrets are not configured for GitHub Actions"
+            exit 1
+          fi
+          if [[ -z "${BRIDGE_URL:-}" || -z "${BRIDGE_KEY:-}" ]]; then
+            echo "::error::Read-only bridge connection is not configured"
+            exit 1
+          fi
+      - name: Install Worker dependencies
+        run: npm install --prefix worker --no-audit --no-fund
+      - name: Deploy verified Worker to Cloudflare
+        working-directory: worker
+        run: npx wrangler deploy
+      - name: Confirm cloud login and Like readback without creating any interaction
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --max-time 60 -o /tmp/like-probe.json -w '%{http_code}' \
+            -X POST "${BRIDGE_URL%/}/v1/global/verify-cloud-session" \
+            -H "Authorization: Bearer $BRIDGE_KEY" \
+            -H 'Content-Type: application/json' -d '{}')
+          python3 - "$code" <<'PY'
+          import json,sys
+          status=int(sys.argv[1])
+          try:
+              r=json.load(open("/tmp/like-probe.json"))
+          except Exception:
+              print("Cloud readback returned unreadable JSON.")
+              sys.exit(1)
+          ok=status==200 and all(r.get(key) is True for key in ("ok","authenticated","post_identified","like_state_readable")) and r.get("publication_performed") is False
+          print("Cloud-only authenticated Like readback: "+("PASS" if ok else "FAIL")+", upstream HTTP "+str(status))
+          if not ok:
+              print("Public action performed: no")
+              print("Cloud verification failed; check private Worker logs (no target information exposed)")
+              sys.exit(1)
+          PY
