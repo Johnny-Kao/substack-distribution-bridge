@@ -79,9 +79,9 @@ export async function runAuthorizedPostAction(env,{target,kind,body="",postId,ap
       throw Error("ambiguous_like_readback");
     }
     // Verify exact body and authenticated user identity, not just a count.
-    const after=await comments();
-    if(!after.ok||!after.data)throw Error("ambiguous_comment_readback");
-    const commentId=exact(after.data,write.id);
+    const commentReadback=await comments();
+    if(!commentReadback.ok||!commentReadback.data)throw Error("ambiguous_comment_readback");
+    const commentId=exact(commentReadback.data,write.id);
     if(!commentId)throw Error("ambiguous_comment_readback");
     return {ok:true,status:"commented",verified:true,public_id:String(commentId),publication_performed:true};
   }finally{
