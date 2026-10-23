@@ -11,12 +11,20 @@ async function discover(env){
   // Only process an allowlisted source list stored PRIVATELY in Cloudflare.
   const raw=await env.DB.prepare("SELECT value FROM settings WHERE key='sources'").first();
   const sources=raw?.value?JSON.parse(raw.value):[];
+  const cooling=await env.DB.prepare("SELECT value FROM settings WHERE key='cooldown_until'").first();
+  if(cooling?.value && Date.now()<Number(cooling.value)) return 0;
   let inspected=0;
   const responses={};
   for(const pub of sources.slice(0,12)){
     if(!/^[a-z0-9-]{2,60}$/.test(pub)) continue;
     const r=await fetch("https://"+pub+".substack.com/api/v1/posts?limit=12&offset=0",{headers:{"Accept":"application/json"},signal:AbortSignal.timeout(12000)});
     responses[String(r.status)]=(responses[String(r.status)]||0)+1;
+    if(r.status===429){
+      const seconds=Number(r.headers.get("Retry-After"));
+      const delay=Number.isFinite(seconds)&&seconds>0?Math.max(3600,Math.min(seconds,86400)):21600;
+      await env.DB.prepare("INSERT INTO settings(key,value) VALUES('cooldown_until',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(String(Date.now()+delay*1000)).run();
+      break;
+    }
     if(!r.ok) continue;
     const posts=await r.json();
     if(!Array.isArray(posts))continue;
