@@ -1,4 +1,5 @@
 name: Read back exact approved comment (cloud only, no write)
+# Post-failure reconciliation read only; never publishes any comment.
 on:
   push:
     branches: [master]
