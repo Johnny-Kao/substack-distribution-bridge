@@ -125,3 +125,37 @@ export async function verifyCloudPostLike(env,{target,postId}){
     await browser.close().catch(()=>{});
   }
 }
+
+/** Read-only proof that Cloudflare can inspect this post's comment thread. */
+export async function verifyCloudCommentReadback(env,{target,postId}){
+  const loc=parsePostTarget(target);
+  if(!loc||!Number.isSafeInteger(postId)||postId<1)throw Error("invalid_comment_probe_target");
+  if(typeof env.SUBSTACK_SESSION!=="string"||env.SUBSTACK_SESSION.length<20||!env.BROWSER)throw Error("cloud_comment_session_unavailable");
+  const browser=await puppeteer.launch(env.BROWSER);
+  try{
+    const page=await browser.newPage();
+    await page.setCookie({name:"substack.sid",value:env.SUBSTACK_SESSION.trim(),domain:".substack.com",path:"/",httpOnly:true,secure:true});
+    await page.goto("https://substack.com/",{waitUntil:"domcontentloaded",timeout:18000});
+    const userId=await page.evaluate(async()=>{
+      const r=await fetch("/api/v1/user/profile/self",{credentials:"include"});
+      const d=r.ok?await r.json().catch(()=>null):null;
+      return Number.isSafeInteger(d?.id)?d.id:null;
+    });
+    if(!userId)throw Error("cloud_comment_session_unverified");
+    await page.goto("https://"+loc.host+"/",{waitUntil:"domcontentloaded",timeout:18000});
+    const detail=await page.evaluate(async id=>{
+      const r=await fetch("/api/v1/posts/by-id/"+id,{credentials:"include"});
+      const d=r.ok?await r.json().catch(()=>null):null,p=d?.post||d;
+      return {id:p?.id,canonical:p?.canonical_url};
+    },postId);
+    if(detail.id!==postId||detail.canonical!==loc.url)throw Error("cloud_comment_target_mismatch");
+    const list=await page.evaluate(async id=>{
+      const r=await fetch("/api/v1/post/"+id+"/comments?token=&all_comments=true&sort=most_recent_first",{credentials:"include"});
+      if(!r.ok)return {ok:false};
+      const d=await r.json().catch(()=>null);
+      return {ok:Array.isArray(d?.comments)};
+    },postId);
+    if(!list.ok)throw Error("cloud_comment_listing_unavailable");
+    return {ok:true,authenticated:true,post_identified:true,comments_readable:true,publication_performed:false};
+  }finally{await browser.close().catch(()=>{});}
+}
