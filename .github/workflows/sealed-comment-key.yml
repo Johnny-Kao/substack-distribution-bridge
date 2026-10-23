@@ -1,0 +1,41 @@
+name: Private one-time comment envelope key
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/sealed-comment-key.yml"
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Generate encryption key only on GitHub runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out /tmp/one-time-private-key.pem >/dev/null 2>&1
+          openssl pkey -in /tmp/one-time-private-key.pem -pubout -out /tmp/one-time-public-key.pem
+          echo "BEGIN ONE-TIME PUBLIC ENCRYPTION KEY"
+          cat /tmp/one-time-public-key.pem
+          echo "END ONE-TIME PUBLIC ENCRYPTION KEY"
+      - name: Install Worker dependencies
+        run: npm install --prefix worker --no-audit --no-fund
+      - name: Store private decryption key exclusively in Cloudflare Secrets
+        working-directory: worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+          npx wrangler secret put APPROVED_COMMENT_PRIVATE_PEM < /tmp/one-time-private-key.pem
+          shred -u /tmp/one-time-private-key.pem || rm -f /tmp/one-time-private-key.pem
