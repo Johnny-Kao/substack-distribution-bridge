@@ -28,7 +28,7 @@ function validate(p){
  if(typeof p.origin!=="string"||!["manual","qc_auto"].includes(p.origin))return false;
  return true;
 }
-export async function writeHandler(request,env,url){
+async function innerWriteHandler(request,env,url){
  if(!await auth(request,env))return reply({error:"owner_write_permission_required"},403);
  const db=env.DB;
  if(url.pathname==="/v1/write/policy"&&request.method==="GET"){
@@ -88,4 +88,12 @@ export async function writeHandler(request,env,url){
   return reply({ok:true,halted:false});
  }
  return reply({error:"not_found"},404);
+}
+
+export async function writeHandler(request,env,url){
+ try{return await innerWriteHandler(request,env,url);}
+ catch(_error){
+  try{await stop(env.DB,"unexpected_write_control_error");}catch{}
+  return reply({error:"write_control_halted"},503);
+ }
 }
