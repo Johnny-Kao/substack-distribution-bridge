@@ -66,3 +66,40 @@ export async function runAuthorizedPostAction(env,{target,kind,body="",postId,ap
     if(browser)await browser.close().catch(()=>{});
   }
 }
+
+/**
+ * Read-only, owner-authenticated Like verification. Fails closed on login
+ * uncertainty, missing post identity, redirects, or malformed responses.
+ * No public action is performed and no personal profile information leaves
+ * the Worker.
+ */
+export async function verifyCloudPostLike(env,{target,postId}){
+  const loc=parsePostTarget(target);
+  if(!loc||!Number.isSafeInteger(postId)||postId<1)throw Error("invalid_like_check_target");
+  if(typeof env.SUBSTACK_SESSION!=="string"||env.SUBSTACK_SESSION.length<20)throw Error("substack_session_missing");
+  if(!env.BROWSER)throw Error("cloud_browser_unavailable");
+  const browser=await puppeteer.launch(env.BROWSER);
+  try{
+    const page=await browser.newPage();
+    await page.setCookie({name:"substack.sid",value:env.SUBSTACK_SESSION.trim(),domain:".substack.com",path:"/",httpOnly:true,secure:true});
+    await page.goto("https://substack.com/",{waitUntil:"domcontentloaded",timeout:18000});
+    const authenticated=await page.evaluate(async()=>{
+      const r=await fetch("/api/v1/user/profile/self",{credentials:"include",headers:{accept:"application/json"}});
+      if(!r.ok)return false;
+      const d=await r.json().catch(()=>null);
+      return Number.isSafeInteger(d?.id);
+    });
+    if(!authenticated)throw Error("cloud_substack_session_unverified");
+    await page.goto("https://"+loc.host+"/",{waitUntil:"domcontentloaded",timeout:18000});
+    const state=await page.evaluate(async(id)=>{
+      const r=await fetch("/api/v1/posts/by-id/"+id,{credentials:"include",headers:{accept:"application/json"}});
+      if(!r.ok)return {ok:false};
+      const d=await r.json().catch(()=>null),p=d?.post||d;
+      return {ok:p?.id===id&&typeof p?.reaction==="boolean",canonical:p?.canonical_url||"",liked:p?.reaction===true};
+    },postId);
+    if(!state.ok||state.canonical!==loc.url)throw Error("cloud_like_readback_unverified");
+    return {ok:true,authenticated:true,liked:state.liked,verified:true,publication_performed:false};
+  }finally{
+    await browser.close().catch(()=>{});
+  }
+}
