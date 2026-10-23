@@ -19,7 +19,7 @@ from scripts.qc import Candidate, precheck
 
 def get_json(url, headers=None, payload=None, timeout=20):
     data = None if payload is None else json.dumps(payload).encode("utf8")
-    request = Request(url, data=data, headers=headers or {})
+    request = Request(url, data=data, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/123 Safari/537.36", "Accept": "application/json", **(headers or {})})
     with urlopen(request, timeout=timeout) as response:
         return json.load(response)
 
