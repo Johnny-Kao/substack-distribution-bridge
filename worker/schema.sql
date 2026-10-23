@@ -7,3 +7,4 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_proposal_identity ON proposals(kind,target
 CREATE TABLE IF NOT EXISTS write_policy (id INTEGER PRIMARY KEY CHECK(id=1), halted INTEGER NOT NULL DEFAULT 0, reason TEXT, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
 INSERT OR IGNORE INTO write_policy(id,halted) VALUES(1,0);
 CREATE INDEX IF NOT EXISTS idx_operations_time ON operations(created_at,kind,status);
+CREATE TABLE IF NOT EXISTS ai_usage (id TEXT PRIMARY KEY, kind TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);

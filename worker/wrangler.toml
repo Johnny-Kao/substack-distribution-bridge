@@ -6,3 +6,6 @@ workers_dev = true
 binding = "DB"
 database_name = "substack-distribution-private"
 database_id = "1ae103d8-90c0-4f66-9e82-1c44eb59544d"
+
+[ai]
+binding = "AI"

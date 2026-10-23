@@ -42,6 +42,26 @@ async function innerWriteHandler(request,env,url){
   const same=await db.prepare("SELECT id,state FROM proposals WHERE kind=? AND target=? AND body_hash=?").bind(input.kind,input.target,bodyHash).first();
   return reply({dry_run:true,accepted:!same,duplicate:same||null,proposal_id:input.id,content_hash:bodyHash,requires_approval:input.kind!=="like"||input.origin!=="qc_auto",live_writes_disabled:env.ENABLE_LIVE_WRITES!=="true"});
  }
+ if(url.pathname==="/v1/write/ai-draft"&&request.method==="POST"){
+  if((await halted(db))?.halted)return reply({error:"write_operations_halted"},423);
+  const input=await request.json().catch(()=>null);
+  if(!input||!["comment","note"].includes(input.kind)||typeof input.article!=="string"||input.article.trim().length<150||input.article.length>9000)return reply({error:"invalid_draft_context"},400);
+  if(!env.AI)return reply({error:"ai_not_configured"},503);
+  const usage=await db.prepare("SELECT COUNT(*) AS n FROM ai_usage WHERE created_at>=datetime('now','-1 day')").first();
+  if((usage?.n||0)>=8)return reply({error:"private_ai_daily_cap_reached"},429);
+  const isComment=input.kind==="comment";
+  const instructions=isComment
+    ?"Propose ONE thoughtful English Substack comment, 40-100 words. Reference an actual argument in the source, add a non-obvious observation or question. Never flatter generically, invent evidence, advertise, or add URLs."
+    :"Draft ONE concise original English Substack Note, 40-90 words, with a concrete thought-provoking hook. No generic praise, invented claims, URLs, or promotional copy.";
+  const output=await env.AI.run("@cf/meta/llama-3.1-8b-instruct-fp8",{
+   messages:[{role:"system",content:"You are a careful editorial assistant. Use only the supplied text. Return only the proposed draft, without a preface."},{role:"user",content:instructions+"\n\nSOURCE ARTICLE:\n"+input.article}],
+   max_tokens:260
+  });
+  const draft=typeof output?.response==="string"?output.response.trim():"";
+  if(!draft||draft.length>1800)throw Error("unusable_private_ai_output");
+  await db.prepare("INSERT INTO ai_usage(id,kind) VALUES(?,?)").bind(crypto.randomUUID(),input.kind).run();
+  return reply({ok:true,kind:input.kind,draft,requires_user_approval:true,publication_performed:false});
+ }
  if(url.pathname==="/v1/write/propose"&&request.method==="POST"){
   const p=await halted(db);if(p.halted)return reply({error:"write_operations_halted"},423);
   const input=await request.json().catch(()=>null);if(!validate(input))return reply({error:"invalid_proposal"},400);
