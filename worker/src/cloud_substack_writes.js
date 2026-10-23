@@ -14,7 +14,7 @@ export async function runAuthorizedPostAction(env,{target,kind,body="",postId,ap
   const loc=parsePostTarget(target);
   if(!approved||!loc||!["like","comment"].includes(kind)||!Number.isSafeInteger(postId)||postId<1)throw Error("invalid_or_unapproved_action");
   // Match the verified local Substack reaction contract; reject unvalidated Comment transport.
-  if(kind==="comment")throw Error("comment_cloud_transport_not_yet_verified");
+  // Comment POST may proceed only after the owner write-control plane verifies exact approval.
   if(typeof env.SUBSTACK_SESSION!=="string"||env.SUBSTACK_SESSION.length<20)throw Error("substack_session_missing");
   if(!env.BROWSER)throw Error("cloud_browser_unavailable");
   let browser;
@@ -32,11 +32,41 @@ export async function runAuthorizedPostAction(env,{target,kind,body="",postId,ap
     },{id:postId});
     const before=await verify();
     if(!before.ok)throw Error("unverified_account_or_post");
+    const owner=await page.evaluate(async()=>{
+      const r=await fetch("https://substack.com/api/v1/user/profile/self",{credentials:"include"});
+      const d=r.ok?await r.json().catch(()=>null):null;
+      return Number.isSafeInteger(d?.id)?d.id:null;
+    });
+    if(!owner)throw Error("cloud_comment_account_unverified");
+    const comments=()=>page.evaluate(async id=>{
+      const r=await fetch("/api/v1/post/"+id+"/comments?token=&all_comments=true&sort=most_recent_first",{credentials:"include"});
+      return r.ok?{ok:true,data:await r.json().catch(()=>null)}:{ok:false};
+    },postId);
+    const exact=(data,wantId=null)=>{
+      const seen=new Set();
+      function search(v,depth=0){
+        if(!v||typeof v!=="object"||depth>12||seen.has(v))return null;
+        seen.add(v);
+        if(!Array.isArray(v)&&Number(v.id)>0&&Number(v.user_id)===owner&&typeof v.body==="string"&&v.body.trim()===body.trim()&&(!wantId||Number(v.id)===wantId))return Number(v.id);
+        for(const x of Object.values(v)){
+          if(Array.isArray(x)){for(const item of x){const id=search(item,depth+1);if(id)return id;}}
+          else if(typeof x==="object"){const id=search(x,depth+1);if(id)return id;}
+        }
+        return null;
+      }
+      return search(data);
+    };
+    if(kind==="comment"){
+      const pre=await comments();
+      if(!pre.ok||!pre.data)throw Error("pre_comment_readback_failed");
+      const found=exact(pre.data);
+      if(found)return {ok:true,status:"already_commented",verified:true,public_id:String(found),publication_performed:false};
+    }
     if(kind==="like"&&before.reaction)return {ok:true,status:"already_liked",verified:true,publication_performed:false};
     if(kind==="comment"&&(!body.trim()||body.length>750))throw Error("invalid_comment");
     const write=await page.evaluate(async args=>{
       const endpoint="/api/v1/post/"+args.id+(args.kind==="like"?"/reaction":"/comment");
-      const payload=args.kind==="like"?{reaction:args.emoji}:{body:args.body};
+      const payload=args.kind==="like"?{reaction:args.emoji}:{body:args.body,parent_id:null};
       const result=await fetch(endpoint,{method:"POST",credentials:"include",headers:{"content-type":"application/json","accept":"application/json"},body:JSON.stringify(payload)});
       const data=await result.json().catch(()=>null);
       return {ok:result.ok,status:result.status,id:args.kind==="comment"?Number(data?.id)||null:null};
@@ -47,21 +77,12 @@ export async function runAuthorizedPostAction(env,{target,kind,body="",postId,ap
       if(after.ok&&after.reaction)return {ok:true,status:"liked",verified:true,publication_performed:true};
       throw Error("ambiguous_like_readback");
     }
-    // Prefer an independently returned comment ID; count alone can race.
-    if(!write.id)throw Error("ambiguous_comment_response");
-    const comment=await page.evaluate(async args=>{
-      const r=await fetch("/api/v1/post/"+args.id+"/comments?all_comments=true",{credentials:"include"});
-      if(!r.ok)return false;
-      const d=await r.json();
-      const walk=(v,depth=0)=>{
-        if(depth>6||!v||typeof v!=="object")return false;
-        if(Number(v.id)===args.commentId&&typeof v.body==="string"&&v.body.trim()===args.body.trim())return true;
-        return Object.values(v).some(x=>Array.isArray(x)?x.some(y=>walk(y,depth+1)):typeof x==="object"&&walk(x,depth+1));
-      };
-      return walk(d);
-    },{id:postId,commentId:write.id,body});
-    if(!comment)throw Error("ambiguous_comment_readback");
-    return {ok:true,status:"commented",verified:true,public_id:String(write.id),publication_performed:true};
+    // Verify exact body and authenticated user identity, not just a count.
+    const after=await comments();
+    if(!after.ok||!after.data)throw Error("ambiguous_comment_readback");
+    const commentId=exact(after.data,write.id);
+    if(!commentId)throw Error("ambiguous_comment_readback");
+    return {ok:true,status:"commented",verified:true,public_id:String(commentId),publication_performed:true};
   }finally{
     if(browser)await browser.close().catch(()=>{});
   }
