@@ -1,0 +1,39 @@
+name: Read back exact approved comment (cloud only, no write)
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/verify-sealed-comment.yml"
+permissions:
+  contents: read
+jobs:
+  readback:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    env:
+      BRIDGE_URL: ${{ vars.BRIDGE_URL }}
+      BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify exact account, exact post, exact text; do not publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --retry 0 --silent --show-error --max-time 100 \
+            -o /tmp/comment-readback.json -w '%{http_code}' \
+            -X POST "${BRIDGE_URL%/}/v1/global/verify-approved-once" \
+            -H "Authorization: Bearer $BRIDGE_KEY" \
+            -H 'Content-Type: application/json' \
+            --data-binary @private_envelopes/approved_comment.enc.json)
+          python3 - "$code" <<'PY'
+          import json,sys
+          try: data=json.load(open("/tmp/comment-readback.json",encoding="utf-8"))
+          except Exception: data={}
+          status=int(sys.argv[1])
+          ok=status==200 and data.get("ok") is True and data.get("verified") is True
+          found=ok and data.get("found") is True and bool(data.get("public_id"))
+          print("Cloud exact-comment readback: "+("VERIFIED_EXISTING_COMMENT" if found else "VERIFIED_NOT_PRESENT" if ok else "UNVERIFIED")+", HTTP "+str(status))
+          if not ok:
+              print("Readback error category: "+str(data.get("code",data.get("error","unknown")))[:65])
+              sys.exit(1)
+          PY
