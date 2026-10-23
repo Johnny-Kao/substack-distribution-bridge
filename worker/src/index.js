@@ -40,9 +40,12 @@ export default {
     if(!env.SUBSTACK_SESSION || env.SUBSTACK_SESSION.length<20)return json({configured:false,valid:false});
     try{
       const headers=new Headers({Accept:"application/json"});
-      headers.set("Cookie", "substack.sid="+env.SUBSTACK_SESSION);
-      const upstream=await fetch("https://substack.com/api/v1/user/self",{headers,signal:AbortSignal.timeout(10000)});
-      return json({configured:true,valid:upstream.status===429?null:upstream.ok,rate_limited:upstream.status===429,upstream_status:upstream.status});
+      const session=env.SUBSTACK_SESSION.trim();
+      headers.set("Cookie", "connect.sid="+session+"; substack.sid="+session);
+      headers.set("User-Agent", "Mozilla/5.0");
+      const upstream=await fetch("https://substack.com/api/v1/user/profile/self",{headers,signal:AbortSignal.timeout(10000)});
+      const retry=upstream.headers.get("Retry-After");
+      return json({configured:true,valid:upstream.status===429?null:upstream.ok,rate_limited:upstream.status===429,upstream_status:upstream.status,retry_after:retry||null});
     }catch{return json({configured:true,valid:false,upstream_status:null});}
   }
   if(url.pathname==="/v1/status"&&req.method==="GET"){
