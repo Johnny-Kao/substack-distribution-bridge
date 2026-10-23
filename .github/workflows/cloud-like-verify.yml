@@ -5,6 +5,7 @@ on:
     paths:
       - "worker/**"
       - "tests/cloud_like.test.mjs"
+      - "tests/write_policy.test.mjs"
       - ".github/workflows/cloud-like-verify.yml"
   workflow_dispatch:
 permissions:
