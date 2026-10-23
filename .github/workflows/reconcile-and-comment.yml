@@ -1,0 +1,86 @@
+name: Reconcile and finish one approved comment
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/reconcile-and-comment.yml"
+permissions:
+  contents: read
+concurrency:
+  group: substack-cloud-like-verification
+  cancel-in-progress: false
+jobs:
+  finish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      BRIDGE_URL: ${{ vars.BRIDGE_URL }}
+      BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependency and validate Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --prefix worker --no-audit --no-fund
+          node --test tests/*.test.mjs
+          python3 -m unittest discover -s tests -q
+          (cd worker && npx wrangler deploy --dry-run --outdir=./.wrangler-verify)
+      - name: Deploy cloud-only approved-comment recovery
+        working-directory: worker
+        run: npx wrangler deploy
+      - name: Independently prove absence and unlock at most one retry
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 17
+          code=$(curl --retry 0 --silent --show-error --max-time 100 \
+            -o /tmp/reconcile.json -w '%{http_code}' \
+            -X POST "${BRIDGE_URL%/}/v1/global/reconcile-approved-once" \
+            -H "Authorization: Bearer $BRIDGE_KEY" -H 'Content-Type: application/json' \
+            --data-binary @private_envelopes/approved_comment.enc.json)
+          python3 - "$code" <<'PY'
+          import json,sys
+          try: data=json.load(open("/tmp/reconcile.json",encoding="utf-8"))
+          except Exception: data={}
+          status=int(sys.argv[1])
+          allowed=status==200 and data.get("ok") is True and data.get("verified") is True and data.get("status") in ("reconciled_absent_once","already_commented")
+          print("Independent comment recovery: "+("PASS" if allowed else "FAIL")+", HTTP "+str(status))
+          if not allowed:
+              print("Failure category: "+str(data.get("code",data.get("error","unknown")))[:65])
+              sys.exit(1)
+          open("/tmp/approved-comment-recovery-status","w").write(data["status"])
+          PY
+      - name: Publish ONLY if exact readback proved absent, never automatically retry POST
+        shell: bash
+        run: |
+          set -euo pipefail
+          state=$(cat /tmp/approved-comment-recovery-status)
+          if [[ "$state" == "already_commented" ]]; then
+            echo "Exact user comment already exists; no second post issued."
+            exit 0
+          fi
+          [[ "$state" == "reconciled_absent_once" ]] || exit 1
+          sleep 17
+          code=$(curl --retry 0 --silent --show-error --max-time 100 \
+            -o /tmp/execute.json -w '%{http_code}' \
+            -X POST "${BRIDGE_URL%/}/v1/global/approved-once" \
+            -H "Authorization: Bearer $BRIDGE_KEY" -H 'Content-Type: application/json' \
+            --data-binary @private_envelopes/approved_comment.enc.json)
+          python3 - "$code" <<'PY'
+          import json,sys
+          try: data=json.load(open("/tmp/execute.json",encoding="utf-8"))
+          except Exception: data={}
+          status=int(sys.argv[1])
+          verified=status==200 and data.get("ok") is True and data.get("verified") is True and data.get("status") in ("commented","already_commented") and bool(data.get("public_id"))
+          print("Authenticated Substack comment execution and exact-body readback: "+("PASS" if verified else "FAIL")+", HTTP "+str(status))
+          if not verified:
+              print("Failure category: "+str(data.get("error","unknown"))[:64])
+              print("Further retries prohibited without a new independent readback.")
+              sys.exit(1)
+          PY
