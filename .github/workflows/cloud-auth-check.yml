@@ -33,8 +33,11 @@ jobs:
               with urlopen(request,timeout=20) as resp:
                   data=json.load(resp)
                   status=resp.status
-          except (HTTPError,URLError,TimeoutError,ValueError):
-              print("Cloud session check failed: transport or authentication.")
+          except HTTPError as err:
+              print("Cloud session check failed; Worker returned HTTP "+str(err.code)+".")
+              sys.exit(1)
+          except (URLError,TimeoutError,ValueError):
+              print("Cloud session check failed: network or unreadable response.")
               sys.exit(1)
           configured=data.get("configured") is True
           valid=data.get("valid") is True
