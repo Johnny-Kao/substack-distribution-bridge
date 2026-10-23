@@ -36,6 +36,15 @@ export default {
     return json({ok:true,job_id:id,accepted});
    }catch(e){await record(env,id,"ingest","error");return json({error:"ingest_failed"},502);}
   }
+  if(url.pathname==="/v1/session-check"&&req.method==="GET"){
+    if(!env.SUBSTACK_SESSION || env.SUBSTACK_SESSION.length<20)return json({configured:false,valid:false});
+    try{
+      const headers=new Headers({Accept:"application/json"});
+      headers.set("Cookie", "substack.sid="+env.SUBSTACK_SESSION);
+      const upstream=await fetch("https://substack.com/api/v1/user/self",{headers,signal:AbortSignal.timeout(10000)});
+      return json({configured:true,valid:upstream.status===429?null:upstream.ok,rate_limited:upstream.status===429,upstream_status:upstream.status});
+    }catch{return json({configured:true,valid:false,upstream_status:null});}
+  }
   if(url.pathname==="/v1/status"&&req.method==="GET"){
    const jobs=await env.DB.prepare("SELECT id,kind,status,created_at FROM jobs ORDER BY created_at DESC LIMIT 10").all();
    const cnt=await env.DB.prepare("SELECT count(*) AS n FROM candidates").first();
