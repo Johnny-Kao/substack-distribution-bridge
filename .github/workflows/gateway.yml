@@ -1,0 +1,49 @@
+name: Encrypted agent gateway
+on:
+  issue_comment:
+    types: [created]
+permissions:
+  issues: write
+concurrency:
+  group: encrypted-agent-gateway
+  cancel-in-progress: false
+jobs:
+  relay:
+    if: github.event.issue.number == 1 && github.event.comment.user.login == 'Johnny-Kao' && startsWith(github.event.comment.body, 'enc-v1:')
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Relay encrypted request and encrypted response
+        uses: actions/github-script@v7
+        env:
+          BRIDGE_URL: ${{ vars.BRIDGE_URL }}
+          BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
+        with:
+          script: |
+            const url = process.env.BRIDGE_URL;
+            const auth = process.env.BRIDGE_KEY;
+            const ciphertext = context.payload.comment.body.trim();
+            if (!url || !auth || !ciphertext.startsWith('enc-v1:') || ciphertext.length > 22000) {
+              throw new Error('Invalid gateway configuration or request.');
+            }
+            const response = await fetch(url + '/v1/gateway', {
+              method: 'POST',
+              headers: {'Authorization': 'Bearer ' + auth, 'Content-Type': 'application/json'},
+              body: JSON.stringify({
+                caller: context.payload.comment.user.login,
+                request_id: context.payload.comment.id,
+                envelope: ciphertext
+              })
+            });
+            if (!response.ok) throw new Error('Private gateway unavailable: HTTP ' + response.status);
+            const data = await response.json();
+            if (!data.reply || !data.reply.startsWith('enc-v1:') || data.reply.length > 30000) {
+              throw new Error('Invalid encrypted reply.');
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: data.reply
+            });
+            core.info('Encrypted response delivered; no plaintext data logged.');
