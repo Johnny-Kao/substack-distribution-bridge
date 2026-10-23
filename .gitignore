@@ -1,0 +1,10 @@
+.env*
+.dev.vars*
+.cache/
+*.sqlite
+*.db
+*.log
+*.jsonl
+.wrangler/
+__pycache__/
+private/

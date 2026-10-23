@@ -1,0 +1,38 @@
+name: Read-only discovery
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: substack-read-discovery
+  cancel-in-progress: false
+jobs:
+  qc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deterministic QC unit tests
+        run: python -m unittest discover -s tests -v
+  discover:
+    needs: qc
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Time-window jitter
+        run: sleep $((RANDOM % 181))
+      - name: Trigger private read-only discovery
+        env:
+          BRIDGE_URL: ${{ vars.BRIDGE_URL }}
+          BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${BRIDGE_URL:-}" || -z "${BRIDGE_KEY:-}" ]]; then
+            echo "Bridge not configured; skipped."
+            exit 0
+          fi
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 90 -X POST "${BRIDGE_URL}/v1/discover" -H "Authorization: Bearer ${BRIDGE_KEY}" -H 'Content-Type: application/json' --data '{"read_only":true}')
+          [[ "$code" == 200 ]] || { echo "Discovery failed; HTTP $code"; exit 1; }
+          echo "Discovery accepted; private results remain on Cloudflare."

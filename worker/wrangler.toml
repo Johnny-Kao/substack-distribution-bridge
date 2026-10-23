@@ -1,0 +1,8 @@
+name = "substack-distribution-bridge"
+main = "src/index.js"
+compatibility_date = "2026-10-23"
+workers_dev = true
+[[d1_databases]]
+binding = "DB"
+database_name = "substack-distribution-private"
+database_id = "1ae103d8-90c0-4f66-9e82-1c44eb59544d"
