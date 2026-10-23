@@ -1,6 +1,8 @@
 // Private write control plane. No GitHub Actions credential can invoke these routes.
 // Fail closed: unknown errors halt all execution until owner explicitly resumes.
 import {ownerSubjectProbe} from "./subject.js";
+import {verifyCloudPostLike} from "./cloud_substack_writes.js";
+import {withBrowserBudget} from "./browser_budget.js";
 const reply=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 const kinds=new Set(["like","comment","note"]);
 const limits={like:10,comment:3,note:2};
@@ -38,7 +40,15 @@ async function innerWriteHandler(request,env,url){
    return reply({halted:!!p.halted,reason:p.reason,limits,auto_like_max:5,approval_for:["comment","note"],write_enabled:false,execution_environment:"none",requires_external_authorized_substack_write_access:true});
  }
  if(url.pathname==="/v1/write/check-existing-like"&&request.method==="POST"){
-   return reply({error:"substack_private_api_unavailable_from_cloud",publication_performed:false},503);
+   const input=await request.json().catch(()=>null);
+   if(!goodTarget(input?.target)||!Number.isSafeInteger(input?.post_id)||input.post_id<1)return reply({error:"invalid_like_check_target"},400);
+   try{
+     const outcome=await withBrowserBudget(db,"like_check",()=>verifyCloudPostLike(env,{target:input.target,postId:input.post_id}));
+     return reply(outcome);
+   }catch(err){
+     const code=String(err?.message||"unknown").replace(/[^a-zA-Z0-9_:-]/g,"_").slice(0,65);
+     return reply({error:"cloud_like_check_failed",code,verified:false,publication_performed:false},code==="browser_free_budget_or_pacing"?429:503);
+   }
  }
  if(url.pathname==="/v1/write/dry-run"&&request.method==="POST"){
   const input=await request.json().catch(()=>null);
