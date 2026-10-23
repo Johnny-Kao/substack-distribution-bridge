@@ -21,6 +21,10 @@ from xml.etree import ElementTree as ET
 from scripts.qc import Candidate, precheck
 
 
+class BrowserCapacityError(Exception):
+    """Cloudflare Browser Run free-tier pacing/budget, not Substack denial."""
+
+
 def get_json(url, headers=None, payload=None, timeout=20):
     data = None if payload is None else json.dumps(payload).encode("utf8")
     request = Request(url, data=data, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/123 Safari/537.36", "Accept": "application/json", **(headers or {})})
@@ -39,8 +43,18 @@ def get_rss(base, source, headers):
         },
         method="POST",
     )
-    with urlopen(request, timeout=55) as response:
-        data = response.read(2_000_001)
+    try:
+        with urlopen(request, timeout=55) as response:
+            data = response.read(2_000_001)
+    except HTTPError as error:
+        if error.code == 429:
+            try:
+                info=json.loads(error.read(512))
+                if info.get("code")=="browser_free_budget_or_pacing":
+                    raise BrowserCapacityError() from error
+            except (ValueError,TypeError):
+                pass
+        raise
     if len(data) > 2_000_000:
         raise ValueError("oversized_feed")
     return data
@@ -161,7 +175,7 @@ def execute():
     sources = sources[offset:] + sources[:offset]
     # No AI tokens are used for scanning.
     limit = max(1, min(int(plan.get("max_posts_per_source") or 10), 20))
-    seen, candidates, limited, inspected, blocked = set(), [], False, 0, False
+    seen, candidates, limited, inspected, blocked, browser_deferred = set(), [], False, 0, False, False
     # One source per run: Cloudflare Free Browser Run rate and browser-minute
     # budget are shared with the independent topic-discovery workflow.
     batch_sources = 1
@@ -171,6 +185,9 @@ def execute():
             payload = parse_rss(feed, source, limit)
             inspected += len(payload)
             candidates.extend(select(payload, source, keywords, seen))
+        except BrowserCapacityError:
+            browser_deferred = True
+            break
         except HTTPError as error:
             if error.code in (403, 429):
                 blocked = True
@@ -181,11 +198,15 @@ def execute():
         time.sleep(random.uniform(0.5, 1.5))
     result = get_json(base + "/v1/ingest", {
         **headers, "Content-Type": "application/json",
-    }, {"read_only": True, "candidates": candidates[:150], "rate_limited": limited, "upstream_blocked":blocked})
+    }, {"read_only": True, "candidates": candidates[:150], "rate_limited": limited,
+        "upstream_blocked":blocked, "browser_deferred":browser_deferred})
     if not result.get("ok"):
         raise RuntimeError("Private ingest returned unsuccessful status.")
     if blocked:
         print("Discovery blocked by upstream HTTP 403/429; no automatic cooldown.",file=sys.stderr)
+        return 1
+    if browser_deferred:
+        print("Discovery deferred: shared Cloudflare Browser Run pacing or free quota; no Substack rejection inferred.",file=sys.stderr)
         return 1
     if inspected == 0:
         print("Discovery degraded: no source returned inspectable posts.",file=sys.stderr)

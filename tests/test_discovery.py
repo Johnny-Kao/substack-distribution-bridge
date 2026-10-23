@@ -34,6 +34,23 @@ class DiscoveryTests(unittest.TestCase):
         self.assertTrue(reports[0]["upstream_blocked"])
         self.assertEqual(reports[0]["candidates"],[])
 
+    def test_browser_capacity_is_not_upstream_denial(self):
+        from scripts.discover import BrowserCapacityError
+        reports=[]
+        def response(url,*args,**kwargs):
+            if url.endswith("/v1/plan"):
+                return {"sources":["samplepub"],"keywords":["family office"]}
+            if url.endswith("/v1/ingest"):
+                reports.append(args[1])
+                return {"ok":True}
+            raise AssertionError("unexpected URL")
+        with patch.dict(os.environ,{"BRIDGE_URL":"https://worker.example","BRIDGE_KEY":"dummy"}),patch("scripts.discover.get_json",side_effect=response),patch("scripts.discover.get_rss",side_effect=BrowserCapacityError()),patch("scripts.discover.time.sleep"):
+            result=execute()
+        self.assertEqual(result,1)
+        self.assertEqual(len(reports),1)
+        self.assertTrue(reports[0]["browser_deferred"])
+        self.assertFalse(reports[0]["upstream_blocked"])
+
     def test_public_rss_to_prequalified_post(self):
         body = " ".join(["family office governance decisions"] * 45)
         sample = (

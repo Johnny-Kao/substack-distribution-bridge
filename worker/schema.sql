@@ -55,3 +55,6 @@ CREATE TABLE IF NOT EXISTS subject_search_events (
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_subject_search_events_time ON subject_search_events(created_at);
+CREATE TABLE IF NOT EXISTS global_posts (id INTEGER PRIMARY KEY, publication_id INTEGER NOT NULL, subdomain TEXT NOT NULL, title TEXT NOT NULL, slug TEXT NOT NULL, url TEXT NOT NULL, published TEXT NOT NULL, first_subject_index INTEGER NOT NULL, last_subject_index INTEGER NOT NULL, excerpt TEXT NOT NULL DEFAULT '', wordcount INTEGER NOT NULL DEFAULT 0, comment_count INTEGER NOT NULL DEFAULT 0, reaction_count INTEGER NOT NULL DEFAULT 0, can_comment INTEGER NOT NULL DEFAULT 0, already_liked INTEGER NOT NULL DEFAULT 0, first_seen_at TEXT DEFAULT CURRENT_TIMESTAMP, last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_global_posts_date ON global_posts(published DESC);
+CREATE TABLE IF NOT EXISTS global_search_events (id TEXT PRIMARY KEY, term_index INTEGER NOT NULL, page INTEGER NOT NULL, returned INTEGER NOT NULL, valid_count INTEGER NOT NULL, status TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
