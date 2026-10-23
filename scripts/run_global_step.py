@@ -23,22 +23,48 @@ def execute():
           ", new="+str(int(result.get("new_posts",0)))+
           ", review candidates="+str(int(result.get("prequalified",0)))+
           ", total stored="+str(int(result.get("stored_total",0)))+".")
-    try:
-        # Cloudflare's shared Browser Run D1 gate requires 15s between requests.
+    # Read two articles per run when budget allows. Cloudflare Browser Run
+    # calls share a 15-second D1 pacing gate; each read is spaced explicitly.
+    # A quota deferral stops the batch without losing the completed search.
+    full_reads = 0
+    for _ in range(2):
         time.sleep(17)
-        article=get_json(base+"/v1/global/read",headers,payload={},timeout=55)
+        try:
+            article = get_json(base+"/v1/global/read", headers, payload={}, timeout=55)
+        except HTTPError as error:
+            if error.code == 429:
+                print("Full article read deferred by shared browser quota.", file=sys.stderr)
+                break
+            print("Full article read failed; HTTP status "+str(error.code), file=sys.stderr)
+            return 1
+        except (URLError, TimeoutError, ValueError):
+            print("Full article read transport error.", file=sys.stderr)
+            return 1
         if article.get("ok") is not True:
-            print("Full article verification failed.",file=sys.stderr)
+            print("Full article verification failed.", file=sys.stderr)
             return 1
-        print("Full article readback="+str(int(article.get("full_read",0)))+".")
-        screened=get_json(base+"/v1/global/screen",headers,payload={},timeout=55)
+        count = int(article.get("full_read", 0))
+        full_reads += count
+        if not count:
+            break
+    print("Full article readbacks="+str(full_reads)+".")
+    # AI uses the existing shared 8-per-day quota. Run only for articles
+    # whose complete original text was successfully retrieved.
+    reviewed = 0
+    for _ in range(full_reads):
+        try:
+            screened = get_json(base+"/v1/global/screen", headers, payload={}, timeout=55)
+        except (HTTPError, URLError, TimeoutError, ValueError):
+            print("Private semantic screening unavailable.", file=sys.stderr)
+            return 1
         if screened.get("ok") is not True:
-            print("Private semantic screening rejected the result.",file=sys.stderr)
+            print("Private semantic screening rejected the result.", file=sys.stderr)
             return 1
-        print("Private semantic screening completed; reviewed="+str(int(screened.get("reviewed",0)))+".")
-    except (HTTPError,URLError,TimeoutError,ValueError):
-        print("Private semantic screening deferred or unavailable.",file=sys.stderr)
-        return 1
+        count = int(screened.get("reviewed", 0))
+        reviewed += count
+        if not count:
+            break
+    print("Private semantic screening completed; reviewed="+str(reviewed)+".")
     return 0
 
 if __name__=="__main__":
