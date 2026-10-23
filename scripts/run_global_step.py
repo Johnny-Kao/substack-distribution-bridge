@@ -1,6 +1,7 @@
 """Trigger one private global post-discovery page. No search terms or URLs in public logs."""
 import os
 import sys
+import time
 from urllib.error import HTTPError, URLError
 from scripts.discover import get_json
 
@@ -23,6 +24,8 @@ def execute():
           ", review candidates="+str(int(result.get("prequalified",0)))+
           ", total stored="+str(int(result.get("stored_total",0)))+".")
     try:
+        # Cloudflare's shared Browser Run D1 gate requires 15s between requests.
+        time.sleep(17)
         article=get_json(base+"/v1/global/read",headers,payload={},timeout=55)
         if article.get("ok") is not True:
             print("Full article verification failed.",file=sys.stderr)
