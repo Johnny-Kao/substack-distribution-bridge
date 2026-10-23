@@ -30,4 +30,8 @@ Private targeting weights, source lists, draft histories, engagement evidence, r
 ## Independent acceptance
 - M5 local client: five Likes, one Comment, and one Note were live-published and re-read 2026-10-22/23.
 - GitHub Actions + Cloudflare D1: read-only Discovery end-to-end accepted 2026-10-23.
-- Cloud writes and encrypted gateway require separate production acceptance. Do not mark them PASS based on local client tests.
+- Cloud authenticated session probe: HTTP 200 using the verified M5 header profile.
+- Cloud private write staging: separate owner-only credential, no GitHub publication permissions; Dry-run and denial checks pass.
+- Live cloud writes are deliberately disabled pending exact Substack API readback validation and real semantic QC. Do not mark Likes, Comments or Notes publication PASS based on local client tests.
+- Strict error mode: unexpected write-control failures halt operations; owner must explicitly resume.
+- Approved engagement limits are enforced independently of the discovery schedule. One batch approval pins each target and exact body hash.
