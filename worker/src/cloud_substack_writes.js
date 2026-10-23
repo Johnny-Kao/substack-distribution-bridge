@@ -13,6 +13,8 @@ export function parsePostTarget(raw){
 export async function runAuthorizedPostAction(env,{target,kind,body="",postId,approved=false}){
   const loc=parsePostTarget(target);
   if(!approved||!loc||!["like","comment"].includes(kind)||!Number.isSafeInteger(postId)||postId<1)throw Error("invalid_or_unapproved_action");
+  // Match the verified local Substack reaction contract; reject unvalidated Comment transport.
+  if(kind==="comment")throw Error("comment_cloud_transport_not_yet_verified");
   if(typeof env.SUBSTACK_SESSION!=="string"||env.SUBSTACK_SESSION.length<20)throw Error("substack_session_missing");
   if(!env.BROWSER)throw Error("cloud_browser_unavailable");
   let browser;
@@ -34,7 +36,7 @@ export async function runAuthorizedPostAction(env,{target,kind,body="",postId,ap
     if(kind==="comment"&&(!body.trim()||body.length>750))throw Error("invalid_comment");
     const write=await page.evaluate(async args=>{
       const endpoint="/api/v1/post/"+args.id+(args.kind==="like"?"/reaction":"/comment");
-      const payload=args.kind==="like"?{reaction:args.emoji,surface:"reader"}:{body:args.body};
+      const payload=args.kind==="like"?{reaction:args.emoji}:{body:args.body};
       const result=await fetch(endpoint,{method:"POST",credentials:"include",headers:{"content-type":"application/json","accept":"application/json"},body:JSON.stringify(payload)});
       const data=await result.json().catch(()=>null);
       return {ok:result.ok,status:result.status,id:args.kind==="comment"?Number(data?.id)||null:null};
