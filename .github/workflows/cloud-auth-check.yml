@@ -1,0 +1,47 @@
+name: Existing Cloudflare Substack session check
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/cloud-auth-check.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  session:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    env:
+      BRIDGE_URL: ${{ vars.BRIDGE_URL }}
+      BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
+    steps:
+      - name: Check existing deployed Worker session (no M5, no write)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,sys
+          from urllib.request import Request,urlopen
+          from urllib.error import HTTPError,URLError
+          base=os.environ.get("BRIDGE_URL","").rstrip("/")
+          key=os.environ.get("BRIDGE_KEY","")
+          if not base.startswith("https://") or not key:
+              print("Cloud session check unavailable: read-only bridge settings missing.")
+              sys.exit(1)
+          request=Request(base+"/v1/session-check",headers={"Authorization":"Bearer "+key,"Accept":"application/json"})
+          try:
+              with urlopen(request,timeout=20) as resp:
+                  data=json.load(resp)
+                  status=resp.status
+          except (HTTPError,URLError,TimeoutError,ValueError):
+              print("Cloud session check failed: transport or authentication.")
+              sys.exit(1)
+          configured=data.get("configured") is True
+          valid=data.get("valid") is True
+          limited=data.get("rate_limited") is True
+          print("Cloudflare existing Substack session: configured="+str(configured)+", valid="+str(valid)+", rate_limited="+str(limited)+", HTTP="+str(status))
+          print("No public interaction was performed.")
+          if not (configured and valid):
+              print("Cloud session is not verified. This is separate from the missing deployment token.")
+              sys.exit(1)
+          PY
