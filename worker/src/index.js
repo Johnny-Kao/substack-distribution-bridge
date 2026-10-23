@@ -1,5 +1,4 @@
 // Public code, private data. No public workflow writes private candidate details to GitHub.
-import { handleGateway } from "./gateway.js";
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 const allow=(req,env)=>!!env.BRIDGE_KEY&&(req.headers.get("Authorization")||"")==="Bearer "+env.BRIDGE_KEY;
 async function setting(env,key,fallback){const r=await env.DB.prepare("SELECT value FROM settings WHERE key=?").bind(key).first();return r?.value?JSON.parse(r.value):fallback;}
@@ -36,12 +35,6 @@ export default {
     }
     return json({ok:true,job_id:id,accepted});
    }catch(e){await record(env,id,"ingest","error");return json({error:"ingest_failed"},502);}
-  }
-  if(url.pathname==="/v1/gateway"&&req.method==="POST"){
-    const input=await req.json().catch(()=>null);
-    if(!input || typeof input.envelope!=="string" || input.envelope.length>22000)return json({error:"invalid_request"},400);
-    const result=await handleGateway(env,input);
-    return json(result.body,result.status);
   }
   if(url.pathname==="/v1/status"&&req.method==="GET"){
    const jobs=await env.DB.prepare("SELECT id,kind,status,created_at FROM jobs ORDER BY created_at DESC LIMIT 10").all();
