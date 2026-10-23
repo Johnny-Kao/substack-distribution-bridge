@@ -1,6 +1,5 @@
 // Public code, private data. No public workflow writes private candidate details to GitHub.
 import { writeHandler } from './writes.js';
-import { runnerHandler } from './runner.js';
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 const allow=(req,env)=>!!env.BRIDGE_KEY&&(req.headers.get("Authorization")||"")==="Bearer "+env.BRIDGE_KEY;
 async function setting(env,key,fallback){const r=await env.DB.prepare("SELECT value FROM settings WHERE key=?").bind(key).first();return r?.value?JSON.parse(r.value):fallback;}
@@ -9,9 +8,8 @@ const valid=(s,max)=>typeof s==="string"&&s.length>0&&s.length<=max;
 export default {
  async fetch(req,env){
   const url=new URL(req.url);
-  if(url.pathname==="/health")return json({ok:true,mode:"discovery_and_private_write_staging"});
+  if(url.pathname==="/health")return json({ok:true,mode:"github_cloudflare_only",public_write_enabled:false});
   if(url.pathname.startsWith("/v1/write/"))return writeHandler(req,env,url);
-  if(url.pathname.startsWith("/v1/runner/"))return runnerHandler(req,env,url);
   if(!allow(req,env))return json({error:"unauthorized"},401);
   if(url.pathname==="/v1/plan"&&req.method==="GET"){
    const sources=await setting(env,"sources",[]);
@@ -32,12 +30,13 @@ export default {
       .bind(p.id,p.pub,p.title,p.url,valid(p.published,80)?p.published:null).run();
      accepted++;
     }
-    await record(env,id,"ingest","ok");
-    if(input.rate_limited===true){
+    const blocked=input.upstream_blocked===true||input.rate_limited===true;
+    await record(env,id,"ingest",blocked?"blocked_upstream":"ok");
+    if(blocked){
       await env.DB.prepare("INSERT INTO settings(key,value) VALUES('cooldown_until',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
        .bind(String(Date.now()+21600000)).run();
     }
-    return json({ok:true,job_id:id,accepted});
+    return json({ok:true,job_id:id,accepted,upstream_blocked:blocked});
    }catch(e){await record(env,id,"ingest","error");return json({error:"ingest_failed"},502);}
   }
   if(url.pathname==="/v1/session-check"&&req.method==="GET"){
@@ -57,7 +56,8 @@ export default {
   if(url.pathname==="/v1/status"&&req.method==="GET"){
    const jobs=await env.DB.prepare("SELECT id,kind,status,created_at FROM jobs ORDER BY created_at DESC LIMIT 10").all();
    const cnt=await env.DB.prepare("SELECT count(*) AS n FROM candidates").first();
-   return json({jobs:jobs.results,candidate_count:cnt?.n||0});
+    const cool=await env.DB.prepare("SELECT value FROM settings WHERE key='cooldown_until'").first();
+    return json({jobs:jobs.results,candidate_count:cnt?.n||0,cooldown_until:Number(cool?.value||0),public_write_enabled:false,transport:"github_cloudflare_only"});
   }
   // Write endpoints are deliberately absent until explicit authorization and
   // idempotent readback verification have been validated independently.

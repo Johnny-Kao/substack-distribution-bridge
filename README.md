@@ -1,26 +1,20 @@
 # Substack Distribution Bridge
 
-Privacy-first Substack discovery pipeline. GitHub Actions runs periodic keyword discovery and deterministic Python pre-QC without AI tokens. Cloudflare Worker and private D1 database store sources, personalized keywords, article candidates, and history.
+Privacy-first Substack discovery pipeline using only GitHub Actions, Cloudflare Worker, Workers AI and D1. No local computer or external paid service is required for the deployed control plane.
 
 ## Current capabilities
-- Scheduled read-only discovery and QC via GitHub Actions, with randomized scheduling offsets.
+- Scheduled read-only discovery and QC via GitHub Actions with randomized scheduling offsets; upstream access failures are reported as failures, **not** successful zero-result scans.
 - All private data is stored in Cloudflare and is not printed in Actions output.
 - Cloudflare bridge credentials are held in Secrets.
-- Substack's Cloudflare edge currently refuses authenticated direct Worker requests (HTTP 429). The private Cloudflare approval queue therefore uses a separately authenticated **M5 pull runner**, rather than making direct Worker-to-Substack write requests.
-- The M5 runner claims only specifically approved manual proposals, verifies SHA-256 approval hashes, checks existing Likes, writes through the already tested local Substack client, and reports verified or unknown status. Errors halt further work.
-- Automatic QC-triggered Likes are **not yet active**; the live private runner handles explicitly approved jobs only.
+- Private editorial AI drafts, proposal hashes and manual batch approval remain in Cloudflare D1. These operations **do not publish** to Substack.
+- Direct authenticated Substack requests from Cloudflare returned HTTP 429; GitHub-hosted public RSS and profile requests returned HTTP 403. Cloudflare-hosted public RSS returned HTTP 429. A cached RSS JSON response from another Worker is not evidence of fresh upstream connectivity.
+- **Public Likes, Comments and Notes are disabled**. Substack does not currently provide a generally available official write API for those operations. Do not claim unattended publication or an operational public-write workflow.
+- No M5 LaunchAgent, runner credential or external hosting is part of the production architecture.
 
-## M5 one-time runner setup
-The runtime is staged in `~/Library/Application Support/SubstackBridge` rather than `Downloads`, because background Python startup was blocked when installed under the protected Downloads directory.
-
-With direct access to the M5 Terminal, run:
-
-```bash
-cd ~/Downloads/Coding/substack-ops/distribution-deploy
-python3 scripts/install_m5_runner.py
-```
-
-This locally copies the existing Substack session, runtime configuration, and independent runner key into the application support directory without printing them; verifies both Cloudflare and Substack authentication; and installs a 300-second macOS LaunchAgent. The remote assistant cannot transfer these session files due to tool safety controls. No public interaction is created by installation. Never commit any runtime credential files.
+## Acceptance
+- Discovery cannot be marked PASS if it fetched zero articles while private source configuration is present.
+- HTTP 403/429 is recorded in private D1 and triggers a six-hour cooldown; data is retained.
+- Public posting requires separately demonstrated supported write access, exact-target approvals, idempotency and readback before any future activation.
 
 ## Agent interoperability
 AI clients can read the public SOP and workflow code using GitHub MCP. Public repository, Issues, and Actions are **not** private communication channels and must not be used to transmit operational contents, even encrypted. Private state query transport must be separately authorized and privacy-reviewed before activation.

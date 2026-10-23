@@ -28,12 +28,12 @@ Private targeting weights, source lists, draft histories, engagement evidence, r
 - Gradually expand autonomy only after user-approved policies, platform rules and quality evidence support it; begin with discovery and supervised batch operations.
 
 ## Independent acceptance
-- M5 local client: five Likes, one Comment, and one Note were live-published and re-read 2026-10-22/23.
+- Historical M5 local client verification does not constitute production acceptance; no local runner is deployed in the active cloud-only architecture.
 - GitHub Actions + Cloudflare D1: read-only Discovery end-to-end accepted 2026-10-23.
 - Cloud authenticated session probe: HTTP 200 using the verified M5 header profile.
 - Cloud private write staging: separate owner-only credential, no GitHub publication permissions; Dry-run and denial checks pass.
-- Direct Cloudflare-to-Substack authenticated requests are blocked upstream (HTTP 429). A private M5 pull runner now uses the locally verified Substack client for user-approved operations. The cloud direct-write endpoint remains disabled.
-- M5 runtime setup and true approved-write readback still require acceptance; never mark the new cross-service write flow PASS based solely on simulated tests.
-- Auto QC Likes remain disabled until semantic QC is fully connected and validated. The M5 queue currently accepts approved manual proposals only.
+- Direct Cloudflare-to-Substack authenticated and public feed requests returned HTTP 429; GitHub-hosted feed requests returned HTTP 403. No working production cloud-only Substack write transport is verified.
+- All live public writes remain disabled, including auto QC Likes, until a supported Substack write interface and end-to-end verification are demonstrated using only GitHub and Cloudflare.
+- Discovery must report an upstream block or zero fetched posts as degraded, never as success. Maintain a six-hour cooldown after 403/429.
 - Strict error mode: unexpected write-control failures halt operations; owner must explicitly resume.
 - Approved engagement limits are enforced independently of the discovery schedule. One batch approval pins each target and exact body hash.

@@ -1,5 +1,4 @@
 // Private write control plane. No GitHub Actions credential can invoke these routes.
-import {performVerifiedWrite,existingLikeStatus} from "./executor.js";
 // Fail closed: unknown errors halt all execution until owner explicitly resumes.
 const reply=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 const kinds=new Set(["like","comment","note"]);
@@ -34,30 +33,17 @@ async function innerWriteHandler(request,env,url){
  const db=env.DB;
  if(url.pathname==="/v1/write/policy"&&request.method==="GET"){
   const p=await halted(db);
-  return reply({halted:!!p.halted,reason:p.reason,limits,auto_like_max:5,approval_for:["comment","note"],write_enabled:env.ENABLE_LIVE_WRITES==="true"});
+   return reply({halted:!!p.halted,reason:p.reason,limits,auto_like_max:5,approval_for:["comment","note"],write_enabled:false,execution_environment:"none",requires_external_authorized_substack_write_access:true});
  }
  if(url.pathname==="/v1/write/check-existing-like"&&request.method==="POST"){
-  const cooling=await db.prepare("SELECT value FROM settings WHERE key='like_probe_cooldown_until'").first();
-  if(cooling?.value&&Date.now()<Number(cooling.value))return reply({error:"upstream_cooldown_active"},429);
-  const input=await request.json().catch(()=>null);
-  if(!goodTarget(input?.target))return reply({error:"invalid_target"},400);
-  try {
-   const value=await existingLikeStatus(env,input.target);
-   return reply({ok:true,...value,publication_performed:false});
-  } catch(e) {
-   const reason=String(e.message||"unknown").replace(/[^a-zA-Z0-9_:]/g,"_").slice(0,65);
-   if(reason.endsWith("_http_429")){
-    await db.prepare("INSERT INTO settings(key,value) VALUES('like_probe_cooldown_until',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(String(Date.now()+21600000)).run();
-   }
-   return reply({error:"read_probe_failed",reason},502);
-  }
+   return reply({error:"substack_private_api_unavailable_from_cloud",publication_performed:false},503);
  }
  if(url.pathname==="/v1/write/dry-run"&&request.method==="POST"){
   const input=await request.json().catch(()=>null);
   if(!validate(input))return reply({error:"invalid_proposal"},400);
   const bodyHash=await digest(input.kind+"\u0000"+input.target+"\u0000"+input.body);
   const same=await db.prepare("SELECT id,state FROM proposals WHERE kind=? AND target=? AND body_hash=?").bind(input.kind,input.target,bodyHash).first();
-  return reply({dry_run:true,accepted:!same,duplicate:same||null,proposal_id:input.id,content_hash:bodyHash,requires_approval:input.kind!=="like"||input.origin!=="qc_auto",live_writes_disabled:env.ENABLE_LIVE_WRITES!=="true"});
+   return reply({dry_run:true,accepted:!same,duplicate:same||null,proposal_id:input.id,content_hash:bodyHash,requires_approval:input.kind!=="like"||input.origin!=="qc_auto",live_writes_disabled:true});
  }
  if(url.pathname==="/v1/write/ai-draft"&&request.method==="POST"){
   if((await halted(db))?.halted)return reply({error:"write_operations_halted"},423);
@@ -113,31 +99,7 @@ async function innerWriteHandler(request,env,url){
   return reply({halted:!!state.halted,proposals:rows.results});
  }
  if(url.pathname==="/v1/write/execute"&&request.method==="POST"){
-  if(env.ENABLE_LIVE_WRITES!=="true")return reply({error:"live_writes_disabled"},423);
-   if((await halted(db))?.halted)return reply({error:"write_operations_halted"},423);
-   const input=await request.json().catch(()=>null);
-   if(!goodId(input?.id))return reply({error:"invalid_operation_id"},400);
-   const row=await db.prepare("SELECT * FROM proposals WHERE id=?").bind(input.id).first();
-   if(!row||row.state!=="approved")return reply({error:"not_approved"},403);
-   if(row.kind==="like"&&row.origin==="qc_auto")return reply({error:"automatic_qc_not_yet_proven"},423);
-   const existing=await db.prepare("SELECT id FROM operations WHERE kind=? AND target=? AND status IN ('executing','succeeded','unknown')").bind(row.kind,row.target).first();
-   if(existing)return reply({error:"target_already_handled"},409);
-   const max=limits[row.kind];
-   // Quota and unique operation claim happen in one serialized D1 statement.
-   const claim=await db.prepare("INSERT OR IGNORE INTO operations(id,kind,target,approved_hash,status) SELECT ?,?,?,?,'executing' WHERE (SELECT COUNT(*) FROM operations WHERE kind=? AND status IN ('executing','succeeded','unknown') AND DATE(created_at,'+9 hours')=DATE('now','+9 hours'))<?")
-    .bind(row.id,row.kind,row.target,row.body_hash,row.kind,max).run();
-   if(!claim.meta?.changes)return reply({error:"already_claimed_or_daily_cap"},409);
-   try{
-    const result=await performVerifiedWrite(env,row);
-    if(!result.verified)throw Error("upstream_result_unverified");
-    await db.prepare("UPDATE operations SET status='succeeded',public_id=? WHERE id=? AND status='executing'").bind(result.public_id,row.id).run();
-    await db.prepare("UPDATE proposals SET state='sent' WHERE id=? AND state='approved'").bind(row.id).run();
-    return reply({ok:true,verified:true,operation_id:row.id,public_id:result.public_id,already_existed:!!result.already_existed});
-   }catch(_error){
-    await db.prepare("UPDATE operations SET status='unknown' WHERE id=? AND status='executing'").bind(row.id).run();
-    await stop(db,"upstream_write_error_or_unverified");
-    return reply({error:"operation_unknown_and_halted",operation_id:row.id},503);
-   }
+   return reply({error:"no_verified_cloud_only_substack_write_path",publication_performed:false},423);
  }
  if(url.pathname==="/v1/write/halt"&&request.method==="POST"){
   await stop(db,"owner_stop");return reply({ok:true,halted:true});

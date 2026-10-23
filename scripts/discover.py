@@ -74,7 +74,7 @@ def execute():
     random.shuffle(sources)
     # No AI cost for the scan. Limit sources and upstream requests per run.
     limit = max(1, min(int(plan.get("max_posts_per_source") or 10), 20))
-    seen, candidates, limited, inspected = set(), [], False, 0
+    seen, candidates, limited, inspected, blocked = set(), [], False, 0, False
     jst_hour = datetime.now(ZoneInfo("Asia/Tokyo")).hour
     # Europe/US business windows: more coverage; Japan midday: lighter coverage.
     batch_sources = 5 if (jst_hour >= 17 or jst_hour < 6) else (3 if jst_hour < 12 else 2)
@@ -86,17 +86,24 @@ def execute():
                 inspected += len(payload)
                 candidates.extend(select(payload, source, keywords, seen))
         except HTTPError as error:
-            if error.code == 429:
-                limited = True
+            if error.code in (403, 429):
+                blocked = True
+                limited = error.code == 429
                 break
         except (URLError, TimeoutError, ValueError):
             pass
         time.sleep(random.uniform(0.5, 1.5))
     result = get_json(base + "/v1/ingest", {
         **headers, "Content-Type": "application/json",
-    }, {"read_only": True, "candidates": candidates[:150], "rate_limited": limited})
+    }, {"read_only": True, "candidates": candidates[:150], "rate_limited": limited, "upstream_blocked":blocked})
     if not result.get("ok"):
         raise RuntimeError("Private ingest returned unsuccessful status.")
+    if blocked:
+        print("Discovery blocked by upstream HTTP 403/429; cooldown recorded privately.",file=sys.stderr)
+        return 1
+    if inspected == 0:
+        print("Discovery degraded: no source returned inspectable posts.",file=sys.stderr)
+        return 1
     print(f"Read-only scan completed; fetched {inspected}, prequalified {len(candidates)}, accepted {result.get('accepted',0)}, upstream_limited={limited}.")
     return 0
 
