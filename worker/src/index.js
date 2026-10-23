@@ -12,9 +12,11 @@ async function discover(env){
   const raw=await env.DB.prepare("SELECT value FROM settings WHERE key='sources'").first();
   const sources=raw?.value?JSON.parse(raw.value):[];
   let inspected=0;
+  const responses={};
   for(const pub of sources.slice(0,12)){
     if(!/^[a-z0-9-]{2,60}$/.test(pub)) continue;
     const r=await fetch("https://"+pub+".substack.com/api/v1/posts?limit=12&offset=0",{headers:{"Accept":"application/json"},signal:AbortSignal.timeout(12000)});
+    responses[String(r.status)]=(responses[String(r.status)]||0)+1;
     if(!r.ok) continue;
     const posts=await r.json();
     if(!Array.isArray(posts))continue;
@@ -26,6 +28,7 @@ async function discover(env){
       inspected++;
     }
   }
+  await env.DB.prepare("INSERT INTO settings(key,value) VALUES('last_http_statuses',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(JSON.stringify(responses)).run();
   return inspected;
 }
 export default {
@@ -43,7 +46,8 @@ export default {
     if(url.pathname==="/v1/status"&&request.method==="GET"){
       const jobs=await env.DB.prepare("SELECT id,kind,status,created_at FROM jobs ORDER BY created_at DESC LIMIT 10").all();
       const cnt=await env.DB.prepare("SELECT count(*) AS n FROM candidates").first();
-      return json({jobs:jobs.results,candidate_count:cnt?.n||0});
+      const codes=await env.DB.prepare("SELECT value FROM settings WHERE key='last_http_statuses'").first();
+      return json({jobs:jobs.results,candidate_count:cnt?.n||0,http_status_counts:codes?.value?JSON.parse(codes.value):{}});
     }
     return json({error:"not_found"},404);
   }
