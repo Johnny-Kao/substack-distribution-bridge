@@ -26,3 +26,32 @@ CREATE TABLE IF NOT EXISTS engagement_targets (
  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_engagement_target_queue ON engagement_targets(review_state,score DESC,created_at DESC);
+CREATE TABLE IF NOT EXISTS browser_requests (
+ id TEXT PRIMARY KEY,
+ kind TEXT NOT NULL,
+ status TEXT NOT NULL,
+ browser_ms INTEGER NOT NULL DEFAULT 0,
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_browser_requests_time ON browser_requests(created_at);
+CREATE TABLE IF NOT EXISTS discovered_publications (
+ id INTEGER PRIMARY KEY,
+ subdomain TEXT NOT NULL UNIQUE,
+ name TEXT NOT NULL,
+ first_match TEXT NOT NULL,
+ last_match TEXT NOT NULL,
+ discovered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ last_fetched_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_publications_scan_priority ON discovered_publications(last_fetched_at,discovered_at);
+CREATE TABLE IF NOT EXISTS subject_search_events (
+ id TEXT PRIMARY KEY,
+ term_index INTEGER NOT NULL,
+ page INTEGER NOT NULL,
+ returned INTEGER NOT NULL,
+ valid_count INTEGER NOT NULL,
+ status TEXT NOT NULL,
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_subject_search_events_time ON subject_search_events(created_at);

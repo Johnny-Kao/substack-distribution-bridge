@@ -4,8 +4,8 @@ Private targeting weights, source lists, draft histories, engagement evidence, r
 
 ## Discovery
 - Read approved source list / keywords from private policy through the authorized gateway.
-- GitHub Actions calls the private Worker RSS endpoint, which uses the Cloudflare Browser Run binding to obtain public RSS. No Substack authentication is needed for Discovery. The Action performs zero-token metadata scanning and deterministic pre-QC: valid ID, publication date, article length, keyword fit, de-duplication and explicit error handling.
-- Scan hourly with bounded jitter; prioritize Europe/US windows, lighter scanning during Japan daytime.
+- Separate GitHub Actions workflows (subject search every three hours; article scan hourly) call private Cloudflare Worker endpoints. Subject search uses the stored Substack account session and a one-page D1 cursor; newly discovered publications are deduplicated and admitted to the article scan pool. RSS reading is public-only. Each action performs zero-token deterministic pre-QC.
+- GitHub timers are offset; Worker D1 provides an atomic 15-second Browser Run free-plan pacing gate. Maximum 38 actions/24h and 390 seconds accounted time/24h, with no paid fallback.
 - During initial integration testing, HTTP 403/429 is reported immediately as a failure rather than skipping subsequent scheduled or manual diagnostics. Do not retry repeatedly within one run. Data stays private; GitHub logs show only aggregate counts.
 
 ## Content and quality
@@ -31,6 +31,7 @@ Private targeting weights, source lists, draft histories, engagement evidence, r
 
 ## Independent acceptance
 - Historical M5 local client verification does not constitute production acceptance; no local runner is deployed in the active cloud-only architecture.
+- On 2026-10-23, Cloudflare owner-authenticated publication-search read-only request returned 17 valid new publications; D1 source pool contained 24 total and a feed from a newly discovered publication returned five parsed articles. The recurring GitHub subject workflow requires separate acceptance.
 - Worker Browser Run public RSS returned HTTP 200 and XML; local orchestration fetched 10 articles, prequalified 1 and ingested 1 into D1 on 2026-10-23. GitHub-hosted Actions acceptance must be checked separately.
 - Cloud authenticated session probe: HTTP 200 using the verified M5 header profile.
 - Cloud private write staging: separate owner-only credential, no GitHub publication permissions; Dry-run and denial checks pass.

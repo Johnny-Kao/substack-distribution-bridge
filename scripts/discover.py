@@ -14,7 +14,6 @@ import sys
 import time
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from zoneinfo import ZoneInfo
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
@@ -163,11 +162,9 @@ def execute():
     # No AI tokens are used for scanning.
     limit = max(1, min(int(plan.get("max_posts_per_source") or 10), 20))
     seen, candidates, limited, inspected, blocked = set(), [], False, 0, False
-    jst_hour = datetime.now(ZoneInfo("Asia/Tokyo")).hour
-    # Europe/US business windows: more coverage; Japan midday: lighter coverage.
-    # Conservative Cloudflare Browser Run free-budget usage: one source per run,
-    # two during EU/US activity windows, with a separate Worker daily budget.
-    batch_sources = 2 if (jst_hour >= 17 or jst_hour < 6) else 1
+    # One source per run: Cloudflare Free Browser Run rate and browser-minute
+    # budget are shared with the independent topic-discovery workflow.
+    batch_sources = 1
     for source in sources[:batch_sources]:
         try:
             feed = get_rss(base, source, headers)

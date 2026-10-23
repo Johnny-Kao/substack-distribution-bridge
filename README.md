@@ -3,17 +3,18 @@
 Privacy-first Substack discovery pipeline using only GitHub Actions, Cloudflare Worker, Workers AI and D1. No local computer or external paid service is required for the deployed control plane.
 
 ## Current capabilities
-- Scheduled read-only discovery and QC via GitHub Actions. Public RSS is retrieved by the existing Cloudflare Worker through its first-party Browser Run binding (available within Cloudflare's free allowance), not direct GitHub-to-Substack requests. Sources rotate hourly with additional EU/US window coverage.
-- Browser usage is recorded privately in D1 and capped at 36 fetches or 300 seconds per UTC day, whichever comes first; no paid infrastructure is added.
+- Scheduled read-only discovery and QC via GitHub Actions. Public RSS is retrieved by the existing Cloudflare Worker through its first-party Browser Run binding (within the free allowance), not direct GitHub-to-Substack requests. One source is read hourly.
+- A separate GitHub workflow runs one **authenticated, read-only subject search step** every three hours using private Cloudflare settings. The Worker keeps pagination position, deduplicates publication IDs/subdomains in D1, and feeds newly found sources into the regular article/engagement-candidate pipeline. No subject, identity, or publication list is exposed in public GitHub logs.
+- Browser Run is rate-limited across both discovery workflows using one atomic D1 gate (15-second spacing, at most 38 actions and 390 seconds accounted browser usage in 24 hours), with no paid overflow.
 - Upstream access failures are reported as failures, **not** successful zero-result scans.
 - All private data is stored in Cloudflare and is not printed in Actions output.
 - Cloudflare bridge credentials are held in Secrets.
 - Private editorial AI drafts, proposal hashes and manual batch approval remain in Cloudflare D1. These operations **do not publish** to Substack.
 - Discovery candidates now preserve excerpts, subject-fit signals, priority scores, and possible Like/comment *review* actions in a private engagement queue. Semantic review generates rationale and discussion angles, not publication approval.
-- Subject-wide discovery is being validated in M5 research before cloud rollout. `scripts/subject_search.py` paginates the Substack publication-search responses, deduplicates across query variants, and caps requests. This helper is not connected to the production scheduled workflow yet.
-- An owner-authenticated Cloudflare Browser Run **read-only** subject-probe endpoint exists for migration diagnostics. Account-profile access was confirmed, but its subject search encountered Browser Run HTTP 429 and has not passed end-to-end acceptance.
+- M5 research proved multi-page topic search and cross-query dedup. `scripts/subject_search.py` is the portable test helper. Cloudflare's production version now uses a persistent, one-page-per-run search cursor and D1 source pool, to fit Free plan browser limits.
+- The owner-only **read-only** subject-probe endpoint remains available for diagnostics. Cloudflare subject-search returned 17 publications in a live test; the new source pool subsequently returned a valid RSS with five posts.
 - Direct authenticated Substack requests from Workers returned HTTP 429, and GitHub-hosted direct RSS returned HTTP 403. The read-only Browser Run RSS path returned real XML over HTTPS and successfully populated D1 in a local end-to-end test. Authenticated social actions remain unverified.
-- **Public Likes, Comments and Notes are disabled**. Topic-wide discovery across authors is not yet verified. Do not claim unattended publication or a complete engagement workflow.
+- **Public Likes, Comments and Notes are disabled**. Finding publications is not equivalent to validating author relevance, commentability, previous reactions or publish permissions. Do not claim unattended publication or a complete engagement workflow.
 - No M5 LaunchAgent, runner credential or external hosting is part of the production architecture.
 
 ## Acceptance

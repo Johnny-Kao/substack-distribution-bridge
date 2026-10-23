@@ -1,5 +1,6 @@
 // Read-only Substack discovery against an existing authenticated owner session.
 // Never return session data, bearer tokens or raw browser responses to clients.
+import {withBrowserBudget} from "./browser_budget.js";
 const json=(obj,status=200)=>new Response(JSON.stringify(obj),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 export function decodeBrowserJSON(text){
  if(typeof text!=="string"||text.length>4000000)throw Error("invalid_browser_content");
@@ -12,7 +13,7 @@ export function decodeBrowserJSON(text){
  });
  return JSON.parse(content);
 }
-async function readBrowserJSON(env,url){
+export async function readBrowserJSON(env,url){
  const baseHost="substack.com";
  if(new URL(url).hostname!==baseHost)throw Error("disallowed_host");
  const session=env.SUBSTACK_SESSION;
@@ -21,10 +22,10 @@ async function readBrowserJSON(env,url){
   {name:"substack.sid",value:session.trim(),domain:".substack.com",path:"/",secure:true,httpOnly:true},
   {name:"substack.lli",value:"1",domain:".substack.com",path:"/",secure:true}
  ];
- const browserResponse=await env.BROWSER.quickAction("content",{
+ const browserResponse=await withBrowserBudget(env.DB,"subject",()=>env.BROWSER.quickAction("content",{
   url,cookies,cacheTTL:0,rejectResourceTypes:["image","font","media"],
   gotoOptions:{waitUntil:"domcontentloaded",timeout:16000}
- });
+ }));
  if(!browserResponse.ok)throw Error("browser_transport_"+browserResponse.status);
  const wrapped=await browserResponse.json();
  if(wrapped?.success!==true||wrapped?.meta?.status!==200||wrapped?.meta?.finalUrl!==url||!String(wrapped?.meta?.headers?.["content-type"]||"").includes("json"))throw Error("browser_upstream_not_json200");
