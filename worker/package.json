@@ -1,0 +1,13 @@
+{
+  "name": "substack-distribution-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check src/index.js",
+    "build:check": "wrangler deploy --dry-run --outdir=./.wrangler-verify"
+  },
+  "devDependencies": {
+    "@cloudflare/puppeteer": "1.1.0",
+    "wrangler": "4.152.0"
+  }
+}
