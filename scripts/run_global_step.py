@@ -23,6 +23,11 @@ def execute():
           ", review candidates="+str(int(result.get("prequalified",0)))+
           ", total stored="+str(int(result.get("stored_total",0)))+".")
     try:
+        article=get_json(base+"/v1/global/read",headers,payload={},timeout=55)
+        if article.get("ok") is not True:
+            print("Full article verification failed.",file=sys.stderr)
+            return 1
+        print("Full article readback="+str(int(article.get("full_read",0)))+".")
         screened=get_json(base+"/v1/global/screen",headers,payload={},timeout=55)
         if screened.get("ok") is not True:
             print("Private semantic screening rejected the result.",file=sys.stderr)
