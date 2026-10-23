@@ -1,5 +1,6 @@
 // Public code, private data. No public workflow writes private candidate details to GitHub.
 import { writeHandler } from './writes.js';
+import { feedHandler } from './feed.js';
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 const allow=(req,env)=>!!env.BRIDGE_KEY&&(req.headers.get("Authorization")||"")==="Bearer "+env.BRIDGE_KEY;
 async function setting(env,key,fallback){const r=await env.DB.prepare("SELECT value FROM settings WHERE key=?").bind(key).first();return r?.value?JSON.parse(r.value):fallback;}
@@ -11,6 +12,7 @@ export default {
   if(url.pathname==="/health")return json({ok:true,mode:"github_cloudflare_only",public_write_enabled:false});
   if(url.pathname.startsWith("/v1/write/"))return writeHandler(req,env,url);
   if(!allow(req,env))return json({error:"unauthorized"},401);
+  if(url.pathname==="/v1/source-feed")return feedHandler(req,env);
   if(url.pathname==="/v1/plan"&&req.method==="GET"){
    const sources=await setting(env,"sources",[]);
    const keywords=await setting(env,"keywords",[]);
@@ -25,8 +27,18 @@ export default {
     for(const p of input.candidates){
      if(!p||!valid(p.id,180)||!valid(p.pub,80)||!valid(p.title,300)||!valid(p.url,1000))continue;
      if(!/^[a-z0-9-]{2,60}$/.test(p.pub)||!p.id.startsWith(p.pub+":"))continue;
-     await env.DB.prepare("INSERT OR IGNORE INTO candidates(id,pub,title,url,published) VALUES(?,?,?,?,?)")
-      .bind(p.id,p.pub,p.title,p.url,valid(p.published,80)?p.published:null).run();
+     let uri;
+     try{uri=new URL(p.url);}catch{continue;}
+     if(uri.protocol!=="https:"||uri.hostname!==p.pub+".substack.com"||!uri.pathname.startsWith("/p/")||uri.username||uri.password)continue;
+     if(!Number.isInteger(p.score)||p.score<0||p.score>100||!["comment_review","like_review"].includes(p.suggested_action))continue;
+     if(typeof p.excerpt!=="string"||p.excerpt.length>3500||!Number.isInteger(p.word_count)||p.word_count<100||p.word_count>200000)continue;
+     if(!p.signals||typeof p.signals!=="object"||Array.isArray(p.signals))continue;
+     await env.DB.batch([
+      env.DB.prepare("INSERT OR IGNORE INTO candidates(id,pub,title,url,published) VALUES(?,?,?,?,?)")
+       .bind(p.id,p.pub,p.title,p.url,valid(p.published,80)?p.published:null),
+      env.DB.prepare("INSERT INTO engagement_targets(id,score,suggested_action,evidence_excerpt,evidence_signals,word_count) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET score=excluded.score,suggested_action=excluded.suggested_action,evidence_excerpt=excluded.evidence_excerpt,evidence_signals=excluded.evidence_signals,word_count=excluded.word_count,updated_at=CURRENT_TIMESTAMP WHERE review_state='pending_semantic_review'")
+       .bind(p.id,p.score,p.suggested_action,p.excerpt,JSON.stringify(p.signals),p.word_count),
+     ]);
      accepted++;
     }
     const blocked=input.upstream_blocked===true||input.rate_limited===true;

@@ -4,12 +4,13 @@ Private targeting weights, source lists, draft histories, engagement evidence, r
 
 ## Discovery
 - Read approved source list / keywords from private policy through the authorized gateway.
-- GitHub Actions performs zero-token metadata scanning and deterministic pre-QC: valid ID, publication date, article length, keyword fit, de-duplication, and upstream rate-limit handling.
+- GitHub Actions calls the private Worker RSS endpoint, which uses the Cloudflare Browser Run binding to obtain public RSS. No Substack authentication is needed for Discovery. The Action performs zero-token metadata scanning and deterministic pre-QC: valid ID, publication date, article length, keyword fit, de-duplication and explicit error handling.
 - Scan hourly with bounded jitter; prioritize Europe/US windows, lighter scanning during Japan daytime.
 - During initial integration testing, HTTP 403/429 is reported immediately as a failure rather than skipping subsequent scheduled or manual diagnostics. Do not retry repeatedly within one run. Data stays private; GitHub logs show only aggregate counts.
 
 ## Content and quality
 - Shortlist high-value articles based on substance, network relevance, recency and meaningful discussion. Keywords are an initial filter, not proof of quality.
+- Store title, source, original URL, argument excerpt, scoring evidence, freshness, and proposed engagement type for each candidate in private D1. Candidate status does not grant posting permission.
 - Read the complete original article and existing discussion before proposing any comment.
 - Prefer a concise English observation plus one thoughtful question, never empty praise or blatant link promotion.
 - Notes: develop 5–6 genuinely distinct short hooks per long article. Keep pure-text hooks and original-article link hooks as separate experiments.
@@ -29,11 +30,12 @@ Private targeting weights, source lists, draft histories, engagement evidence, r
 
 ## Independent acceptance
 - Historical M5 local client verification does not constitute production acceptance; no local runner is deployed in the active cloud-only architecture.
-- GitHub Actions + Cloudflare D1: read-only Discovery end-to-end accepted 2026-10-23.
+- Worker Browser Run public RSS returned HTTP 200 and XML; local orchestration fetched 10 articles, prequalified 1 and ingested 1 into D1 on 2026-10-23. GitHub-hosted Actions acceptance must be checked separately.
 - Cloud authenticated session probe: HTTP 200 using the verified M5 header profile.
 - Cloud private write staging: separate owner-only credential, no GitHub publication permissions; Dry-run and denial checks pass.
-- Direct Cloudflare-to-Substack authenticated and public feed requests returned HTTP 429; GitHub-hosted feed requests returned HTTP 403. No working production cloud-only Substack write transport is verified.
+- Direct Worker fetch and GitHub-hosted requests to Substack returned HTTP 429 and HTTP 403 respectively. Browser Run restored public RSS reads; no verified production cloud-only Substack **write** transport exists yet.
 - All live public writes remain disabled, including auto QC Likes, until a supported Substack write interface and end-to-end verification are demonstrated using only GitHub and Cloudflare.
+- Acceptance must independently verify topic-wide discovery beyond fixed sources, semantic target review, prior-interaction deduplication, approved posting and post-write readback. RSS acquisition alone is not acceptance.
 - Discovery must report an upstream block or zero fetched posts as degraded, never as success. No six-hour cooldown until the transport is verified; reintroduce a documented backoff policy only after successful end-to-end acceptance.
 - Strict error mode: unexpected write-control failures halt operations; owner must explicitly resume.
 - Approved engagement limits are enforced independently of the discovery schedule. One batch approval pins each target and exact body hash.

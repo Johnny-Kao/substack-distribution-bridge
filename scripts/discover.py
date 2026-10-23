@@ -5,14 +5,19 @@ Cloudflare gateway. NEVER print any response body, URL, term or individual
 candidate to Actions logs. No artifacts. No local persistence.
 """
 import json
+import hashlib
+import html
 import os
 import random
+import re
 import sys
 import time
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from xml.etree import ElementTree as ET
 
 from scripts.qc import Candidate, precheck
 
@@ -22,6 +27,88 @@ def get_json(url, headers=None, payload=None, timeout=20):
     request = Request(url, data=data, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/123 Safari/537.36", "Accept": "application/json", **(headers or {})})
     with urlopen(request, timeout=timeout) as response:
         return json.load(response)
+
+
+def get_rss(base, source, headers):
+    # The Cloudflare Worker, not the GitHub runner, obtains the public RSS.
+    request = Request(
+        base + "/v1/source-feed",
+        data=json.dumps({"source": source}).encode("utf8"),
+        headers={
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/123 Safari/537.36",
+            **headers, "Content-Type": "application/json", "Accept": "application/rss+xml",
+        },
+        method="POST",
+    )
+    with urlopen(request, timeout=55) as response:
+        data = response.read(2_000_001)
+    if len(data) > 2_000_000:
+        raise ValueError("oversized_feed")
+    return data
+
+
+def parse_rss(content, source, limit=10):
+    if b"<!DOCTYPE" in content.upper():
+        raise ValueError("invalid_xml_doctype")
+    root = ET.fromstring(content)
+    if root.tag != "rss":
+        raise ValueError("invalid_rss_root")
+    out = []
+    for item in root.findall("./channel/item")[:limit]:
+        title = html.unescape(item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip()
+        if not link.startswith("https://" + source + ".substack.com/p/"):
+            continue
+        date = parsedate_to_datetime(item.findtext("pubDate") or "")
+        if not date.tzinfo:
+            continue
+        content_html = item.findtext("{http://purl.org/rss/1.0/modules/content/}encoded") or item.findtext("description") or ""
+        description = html.unescape(re.sub("<[^>]+>", " ", content_html))
+        description = re.sub(r"\s+", " ", description).strip()
+        out.append({
+            "id": hashlib.sha256(link.encode("utf8")).hexdigest()[:20],
+            "title": title,
+            "subtitle": description[:400],
+            "post_date": date.astimezone(timezone.utc).isoformat(),
+            "wordcount": len(description.split()),
+            "article_text": description[:12000],
+            "canonical_url": link,
+        })
+    return out
+
+
+def score_interaction_candidate(post, keywords):
+    """Deterministic evidence, not a semantic endorsement or publish approval."""
+    title = str(post.get("title") or "").casefold()
+    text = str(post.get("article_text") or post.get("subtitle") or "").casefold()
+    words = int(post.get("wordcount") or 0)
+    title_hits = [k for k in keywords if k.casefold() in title]
+    body_hits = [k for k in keywords if k.casefold() in text]
+    try:
+        age_days = max(0, (datetime.now(timezone.utc) - datetime.fromisoformat(str(post["post_date"]).replace("Z", "+00:00"))).total_seconds() / 86400)
+    except (ValueError, KeyError, TypeError):
+        age_days = 3650
+    score = min(45, 22 * len(title_hits)) + min(24, 8 * len(body_hits))
+    score += 16 if age_days <= 3 else (10 if age_days <= 7 else (4 if age_days <= 30 else 0))
+    score += 9 if 300 <= words <= 4000 else (4 if words >= 100 else 0)
+    # The presence of a debatable claim is only a weak signal.
+    argumentative = any(x in text for x in ("however", "because", "trade-off", "tradeoff", "should", "rather than", "the problem", "i argue", "in practice"))
+    if argumentative:
+        score += 6
+    score = min(100, score)
+    action = "comment_review" if score >= 57 and words >= 250 else "like_review"
+    return {
+        "score": score,
+        "suggested_action": action,
+        "signals": {
+            "title_keyword_hits": len(title_hits),
+            "body_keyword_hits": len(body_hits),
+            "age_days": round(age_days, 1),
+            "argument_signal": argumentative,
+        },
+        "excerpt": str(post.get("article_text") or post.get("subtitle") or "")[:3500],
+        "word_count": words,
+    }
 
 
 def select(posts, source, keywords, seen):
@@ -41,7 +128,7 @@ def select(posts, source, keywords, seen):
         eligible, _ = precheck(Candidate(key, title, date, words), seen)
         if not eligible:
             continue
-        searchable = (" " + title + " " + str(p.get("subtitle") or "")).casefold()
+        searchable = (" " + title + " " + str(p.get("article_text") or p.get("subtitle") or "")).casefold()
         matches = sum(1 for kw in keywords if kw.casefold() in searchable)
         if matches < 1:
             continue
@@ -54,6 +141,7 @@ def select(posts, source, keywords, seen):
             "title": title[:300],
             "url": url[:1000],
             "published": date[:80],
+            **score_interaction_candidate(p, keywords),
         })
         seen.add(key)
     return shortlisted
@@ -68,26 +156,30 @@ def execute():
     if not sources or not keywords:
         print("No private discovery configuration; no scan performed.")
         return 0
-    random.shuffle(sources)
-    # No AI cost for the scan. Limit sources and upstream requests per run.
+    # Deterministic hourly rotation; unlike random ordering, every configured
+    # source gets a turn over successive scheduled hours.
+    offset = int(datetime.now(timezone.utc).timestamp() // 3600) % len(sources)
+    sources = sources[offset:] + sources[:offset]
+    # No AI tokens are used for scanning.
     limit = max(1, min(int(plan.get("max_posts_per_source") or 10), 20))
     seen, candidates, limited, inspected, blocked = set(), [], False, 0, False
     jst_hour = datetime.now(ZoneInfo("Asia/Tokyo")).hour
     # Europe/US business windows: more coverage; Japan midday: lighter coverage.
-    batch_sources = 5 if (jst_hour >= 17 or jst_hour < 6) else (3 if jst_hour < 12 else 2)
+    # Conservative Cloudflare Browser Run free-budget usage: one source per run,
+    # two during EU/US activity windows, with a separate Worker daily budget.
+    batch_sources = 2 if (jst_hour >= 17 or jst_hour < 6) else 1
     for source in sources[:batch_sources]:
-        url = f"https://{source}.substack.com/api/v1/posts?limit={limit}&offset=0"
         try:
-            payload = get_json(url, {"Accept": "application/json", "User-Agent": "Mozilla/5.0"}, timeout=16)
-            if isinstance(payload, list):
-                inspected += len(payload)
-                candidates.extend(select(payload, source, keywords, seen))
+            feed = get_rss(base, source, headers)
+            payload = parse_rss(feed, source, limit)
+            inspected += len(payload)
+            candidates.extend(select(payload, source, keywords, seen))
         except HTTPError as error:
             if error.code in (403, 429):
                 blocked = True
                 limited = error.code == 429
                 break
-        except (URLError, TimeoutError, ValueError):
+        except (URLError, TimeoutError, ValueError, ET.ParseError):
             pass
         time.sleep(random.uniform(0.5, 1.5))
     result = get_json(base + "/v1/ingest", {

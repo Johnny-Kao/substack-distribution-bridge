@@ -3,12 +3,15 @@
 Privacy-first Substack discovery pipeline using only GitHub Actions, Cloudflare Worker, Workers AI and D1. No local computer or external paid service is required for the deployed control plane.
 
 ## Current capabilities
-- Scheduled read-only discovery and QC via GitHub Actions with randomized scheduling offsets; upstream access failures are reported as failures, **not** successful zero-result scans.
+- Scheduled read-only discovery and QC via GitHub Actions. Public RSS is retrieved by the existing Cloudflare Worker through its first-party Browser Run binding (available within Cloudflare's free allowance), not direct GitHub-to-Substack requests. Sources rotate hourly with additional EU/US window coverage.
+- Browser usage is recorded privately in D1 and capped at 36 fetches or 300 seconds per UTC day, whichever comes first; no paid infrastructure is added.
+- Upstream access failures are reported as failures, **not** successful zero-result scans.
 - All private data is stored in Cloudflare and is not printed in Actions output.
 - Cloudflare bridge credentials are held in Secrets.
 - Private editorial AI drafts, proposal hashes and manual batch approval remain in Cloudflare D1. These operations **do not publish** to Substack.
-- Direct authenticated Substack requests from Cloudflare returned HTTP 429; GitHub-hosted public RSS and profile requests returned HTTP 403. Cloudflare-hosted public RSS returned HTTP 429. A cached RSS JSON response from another Worker is not evidence of fresh upstream connectivity.
-- **Public Likes, Comments and Notes are disabled**. Substack does not currently provide a generally available official write API for those operations. Do not claim unattended publication or an operational public-write workflow.
+- Discovery candidates now preserve excerpts, subject-fit signals, priority scores, and possible Like/comment *review* actions in a private engagement queue. Semantic review generates rationale and discussion angles, not publication approval.
+- Direct authenticated Substack requests from Workers returned HTTP 429, and GitHub-hosted direct RSS returned HTTP 403. The read-only Browser Run RSS path returned real XML over HTTPS and successfully populated D1 in a local end-to-end test. Authenticated social actions remain unverified.
+- **Public Likes, Comments and Notes are disabled**. Topic-wide discovery across authors is not yet verified. Do not claim unattended publication or a complete engagement workflow.
 - No M5 LaunchAgent, runner credential or external hosting is part of the production architecture.
 
 ## Acceptance
