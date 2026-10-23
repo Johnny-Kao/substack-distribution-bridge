@@ -1,5 +1,6 @@
 // Private write control plane. No GitHub Actions credential can invoke these routes.
 // Fail closed: unknown errors halt all execution until owner explicitly resumes.
+import {ownerSubjectProbe} from "./subject.js";
 const reply=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 const kinds=new Set(["like","comment","note"]);
 const limits={like:10,comment:3,note:2};
@@ -31,6 +32,7 @@ function validate(p){
 async function innerWriteHandler(request,env,url){
  if(!await auth(request,env))return reply({error:"owner_write_permission_required"},403);
  const db=env.DB;
+ if(url.pathname==="/v1/write/subject-probe")return ownerSubjectProbe(request,env);
  if(url.pathname==="/v1/write/policy"&&request.method==="GET"){
   const p=await halted(db);
    return reply({halted:!!p.halted,reason:p.reason,limits,auto_like_max:5,approval_for:["comment","note"],write_enabled:false,execution_environment:"none",requires_external_authorized_substack_write_access:true});
