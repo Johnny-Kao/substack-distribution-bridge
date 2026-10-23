@@ -10,16 +10,16 @@ test("scan credential cannot open writing endpoints",async()=>{
  const r=await writeHandler(req("policy","d".repeat(48)),env,new URL(base+"policy"));
  assert.equal(r.status,403);
 });
-test("approved live writes remain disabled",async()=>{
+test("cloud execution rejects a missing exact approval proof",async()=>{
  const r=await writeHandler(req("execute",env.OWNER_WRITE_KEY,{}),env,new URL(base+"execute"));
- assert.equal(r.status,423);
- assert.equal((await r.json()).error,"no_verified_cloud_only_substack_write_path");
+ assert.equal(r.status,400);
+ assert.equal((await r.json()).error,"invalid_execution_proof");
 });
-test("config flag cannot silently reactivate cloud writes",async()=>{
+test("config flag cannot bypass a missing exact approval proof",async()=>{
  const exposed={...env,ENABLE_LIVE_WRITES:"true"};
  const r=await writeHandler(req("execute",env.OWNER_WRITE_KEY,{}),exposed,new URL(base+"execute"));
- assert.equal(r.status,423);
- assert.equal((await r.json()).error,"no_verified_cloud_only_substack_write_path");
+ assert.equal(r.status,400);
+ assert.equal((await r.json()).error,"invalid_execution_proof");
 });
 test("private Like readback rejects missing target without browser access",async()=>{
  const r=await writeHandler(req("check-existing-like",env.OWNER_WRITE_KEY,{}),env,new URL(base+"check-existing-like"));
