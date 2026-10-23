@@ -24,6 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Random scheduling offset
+        if: github.event_name == 'schedule'
         run: sleep $((RANDOM % 181))
       - name: Keyword discovery and private ingest
         env:
@@ -33,7 +34,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "${BRIDGE_URL:-}" || -z "${BRIDGE_KEY:-}" ]]; then
-            echo "Bridge is not configured; skipping."
-            exit 0
+            echo "Bridge is not configured; discovery cannot run."
+            exit 1
           fi
           python -m scripts.discover
