@@ -41,8 +41,10 @@ export default {
     try{
       const headers=new Headers({Accept:"application/json"});
       const session=env.SUBSTACK_SESSION.trim();
-      headers.set("Cookie", "connect.sid="+session+"; substack.sid="+session);
-      headers.set("User-Agent", "Mozilla/5.0");
+      headers.set("Cookie", "substack.sid="+session+"; substack.lli=1");
+      headers.set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36");
+      headers.set("Origin", "https://johnnykao.substack.com");
+      headers.set("Referer", "https://johnnykao.substack.com/");
       const upstream=await fetch("https://substack.com/api/v1/user/profile/self",{headers,signal:AbortSignal.timeout(10000)});
       const retry=upstream.headers.get("Retry-After");
       return json({configured:true,valid:upstream.status===429?null:upstream.ok,rate_limited:upstream.status===429,upstream_status:upstream.status,retry_after:retry||null});
