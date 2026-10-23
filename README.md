@@ -10,6 +10,7 @@ Privacy-first Substack discovery pipeline using only GitHub Actions, Cloudflare 
 - Cloudflare bridge credentials are held in Secrets.
 - Private editorial AI drafts, proposal hashes and manual batch approval remain in Cloudflare D1. These operations **do not publish** to Substack.
 - Discovery candidates now preserve excerpts, subject-fit signals, priority scores, and possible Like/comment *review* actions in a private engagement queue. Semantic review generates rationale and discussion angles, not publication approval.
+- Subject-wide discovery is being validated in M5 research before cloud rollout. `scripts/subject_search.py` paginates the Substack publication-search responses, deduplicates across query variants, and caps requests. This helper is not connected to the production scheduled workflow yet.
 - Direct authenticated Substack requests from Workers returned HTTP 429, and GitHub-hosted direct RSS returned HTTP 403. The read-only Browser Run RSS path returned real XML over HTTPS and successfully populated D1 in a local end-to-end test. Authenticated social actions remain unverified.
 - **Public Likes, Comments and Notes are disabled**. Topic-wide discovery across authors is not yet verified. Do not claim unattended publication or a complete engagement workflow.
 - No M5 LaunchAgent, runner credential or external hosting is part of the production architecture.

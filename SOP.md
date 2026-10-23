@@ -11,6 +11,7 @@ Private targeting weights, source lists, draft histories, engagement evidence, r
 ## Content and quality
 - Shortlist high-value articles based on substance, network relevance, recency and meaningful discussion. Keywords are an initial filter, not proof of quality.
 - Store title, source, original URL, argument excerpt, scoring evidence, freshness, and proposed engagement type for each candidate in private D1. Candidate status does not grant posting permission.
+- Explore multiple related query variants and result pages per subject, deduplicate publications across terms, then rank by recent relevant posts, discussion quality and meaningful engagement opportunity. Publication counts alone are not success, and M5 research is not cloud acceptance.
 - Read the complete original article and existing discussion before proposing any comment.
 - Prefer a concise English observation plus one thoughtful question, never empty praise or blatant link promotion.
 - Notes: develop 5–6 genuinely distinct short hooks per long article. Keep pure-text hooks and original-article link hooks as separate experiments.
