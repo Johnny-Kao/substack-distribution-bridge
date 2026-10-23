@@ -5,7 +5,7 @@ import { runSubjectDiscovery } from './subject_discovery.js';
 import {globalContentStep} from './global_content.js';
 import {screenGlobalCandidates} from './global_screening.js';
 import {readOneGlobalArticle} from './global_article.js';
-import {verifyCloudPostLike,verifyCloudCommentReadback} from './cloud_substack_writes.js';
+import {verifyCloudPostLike,verifyCloudCommentReadback,runAuthorizedPostAction} from './cloud_substack_writes.js';
 import {withBrowserBudget} from './browser_budget.js';
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 const allow=(req,env)=>!!env.BRIDGE_KEY&&(req.headers.get("Authorization")||"")==="Bearer "+env.BRIDGE_KEY;
@@ -18,6 +18,47 @@ export default {
   if(url.pathname==="/health")return json({ok:true,mode:"github_cloudflare_only",public_write_enabled:false});
   if(url.pathname.startsWith("/v1/write/"))return writeHandler(req,env,url);
   if(!allow(req,env))return json({error:"unauthorized"},401);
+  // Narrow one-shot allowance: only the user's explicitly approved, pinned
+  // SHA-256 payload. BRIDGE_KEY cannot make arbitrary Like/Comment requests.
+  if(url.pathname==="/v1/global/approved-once"&&req.method==="POST"){
+    const expected="9b368097d3afd581ca4be17e3a0d3323e205ff9c168278d2eee864384117f608";
+    const b64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+    const hex=b=>Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,"0")).join("");
+    if(typeof env.APPROVED_COMMENT_PRIVATE_PEM!=="string")return json({error:"sealed_decryption_unconfigured",publication_performed:false},503);
+    try{
+      const envelope=await req.json();
+      if(!envelope||envelope.v!==1||typeof envelope.key!=="string"||typeof envelope.iv!=="string"||typeof envelope.data!=="string"||envelope.key.length>1024||envelope.iv.length>64||envelope.data.length>4096)return json({error:"invalid_envelope"},400);
+      const keyPem=env.APPROVED_COMMENT_PRIVATE_PEM;
+      const der=b64(keyPem.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\s/g,""));
+      const privateKey=await crypto.subtle.importKey("pkcs8",der,{name:"RSA-OAEP",hash:"SHA-256"},false,["decrypt"]);
+      const rawKey=await crypto.subtle.decrypt({name:"RSA-OAEP"},privateKey,b64(envelope.key));
+      const aes=await crypto.subtle.importKey("raw",rawKey,{name:"AES-GCM"},false,["decrypt"]);
+      const plaintext=await crypto.subtle.decrypt({name:"AES-GCM",iv:b64(envelope.iv)},aes,b64(envelope.data));
+      if(hex(await crypto.subtle.digest("SHA-256",plaintext))!==expected)return json({error:"approval_hash_mismatch",publication_performed:false},403);
+      const item=JSON.parse(new TextDecoder().decode(plaintext));
+      if(item?.version!==1||item.action!=="comment"||typeof item.body!=="string"||item.body.length<20||item.body.length>750||!Number.isSafeInteger(item.post_id)||!item.target)return json({error:"invalid_approved_payload"},400);
+      const id="sealed_"+expected.slice(0,40);
+      const existing=await env.DB.prepare("SELECT status,public_id FROM operations WHERE id=?").bind(id).first();
+      if(existing)return json({ok:existing.status==="succeeded",status:existing.status,public_id:existing.public_id||null,publication_performed:false,duplicate:true},existing.status==="succeeded"?200:409);
+      const policy=await env.DB.prepare("SELECT halted FROM write_policy WHERE id=1").first();
+      if(policy?.halted)return json({error:"write_policy_halted",publication_performed:false},423);
+      await env.DB.prepare("INSERT INTO operations(id,kind,target,approved_hash,status) VALUES(?,'comment',?,?,'executing')").bind(id,item.target,expected).run();
+      try{
+        const outcome=await withBrowserBudget(env.DB,"sealed_approved_comment",()=>runAuthorizedPostAction(env,{target:item.target,postId:item.post_id,body:item.body,kind:"comment",approved:true}));
+        if(!outcome?.ok||outcome.verified!==true)throw Error("unverified_cloud_comment");
+        await env.DB.prepare("UPDATE operations SET status='succeeded',public_id=? WHERE id=? AND status='executing'").bind(outcome.public_id||null,id).run();
+        return json({ok:true,status:outcome.status,verified:true,public_id:outcome.public_id||null,publication_performed:outcome.publication_performed===true});
+      }catch(_){
+        await env.DB.batch([
+          env.DB.prepare("UPDATE operations SET status='unknown' WHERE id=?").bind(id),
+          env.DB.prepare("UPDATE write_policy SET halted=1,reason='sealed_comment_ambiguous',updated_at=CURRENT_TIMESTAMP WHERE id=1")
+        ]);
+        return json({error:"comment_execution_ambiguous_halted",publication_performed:null},503);
+      }
+    }catch(_){
+      return json({error:"sealed_approval_invalid",publication_performed:false},400);
+    }
+  }
   if(url.pathname==="/v1/source-feed")return feedHandler(req,env);
   if(url.pathname==="/v1/subject/step")return runSubjectDiscovery(req,env);
    if(url.pathname==="/v1/global/step")return globalContentStep(req,env);
