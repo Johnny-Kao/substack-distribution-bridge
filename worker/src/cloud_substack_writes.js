@@ -159,3 +159,45 @@ export async function verifyCloudCommentReadback(env,{target,postId}){
     return {ok:true,authenticated:true,post_identified:true,comments_readable:true,publication_performed:false};
   }finally{await browser.close().catch(()=>{});}
 }
+
+/** Never posts. Inspect authenticated user's exact comment on exact post. */
+export async function verifyExactCloudComment(env,{target,postId,body}){
+  const loc=parsePostTarget(target);
+  if(!loc||!Number.isSafeInteger(postId)||postId<1||typeof body!=="string"||body.length<20||body.length>750)throw Error("invalid_exact_comment_probe");
+  if(typeof env.SUBSTACK_SESSION!=="string"||env.SUBSTACK_SESSION.length<20||!env.BROWSER)throw Error("cloud_session_missing");
+  const browser=await puppeteer.launch(env.BROWSER);
+  try{
+    const page=await browser.newPage();
+    await page.setCookie({name:"substack.sid",value:env.SUBSTACK_SESSION.trim(),domain:".substack.com",path:"/",secure:true,httpOnly:true});
+    await page.goto("https://substack.com/",{waitUntil:"domcontentloaded",timeout:18000});
+    const userId=await page.evaluate(async()=>{
+      const r=await fetch("/api/v1/user/profile/self",{credentials:"include"});
+      const d=r.ok?await r.json().catch(()=>null):null;
+      return Number.isSafeInteger(d?.id)?d.id:null;
+    });
+    if(!userId)throw Error("cloud_comment_identity_unverified");
+    await page.goto("https://"+loc.host+"/",{waitUntil:"domcontentloaded",timeout:18000});
+    const result=await page.evaluate(async(args)=>{
+      const postResponse=await fetch("/api/v1/posts/by-id/"+args.id,{credentials:"include"});
+      if(!postResponse.ok)return {ok:false,reason:"article_fetch_unavailable"};
+      const d=await postResponse.json().catch(()=>null),post=d?.post||d;
+      if(post?.id!==args.id||post?.canonical_url!==args.url)return {ok:false,reason:"article_identity_mismatch"};
+      const r=await fetch("/api/v1/post/"+args.id+"/comments?token=&all_comments=true&sort=most_recent_first",{credentials:"include"});
+      if(!r.ok)return {ok:false,reason:"comment_list_http_"+r.status};
+      const comments=await r.json().catch(()=>null);
+      if(!Array.isArray(comments?.comments))return {ok:false,reason:"invalid_comment_list"};
+      const scan=(x,depth=0)=>{
+        if(depth>16||!x||typeof x!=="object")return null;
+        if(!Array.isArray(x)&&Number(x.id)>0&&Number(x.user_id)===args.userId&&typeof x.body==="string"&&x.body.trim()===args.body.trim())return Number(x.id);
+        for(const y of Object.values(x)){
+          if(Array.isArray(y)){for(const z of y){const hit=scan(z,depth+1);if(hit)return hit;}}
+          else if(typeof y==="object"){const hit=scan(y,depth+1);if(hit)return hit;}
+        }
+        return null;
+      };
+      return {ok:true,comment_id:scan(comments)};
+    },{id:postId,url:loc.url,userId,body});
+    if(!result.ok)throw Error("cloud_comment_readback_"+String(result.reason||"failed"));
+    return {ok:true,verified:true,found:Number.isSafeInteger(result.comment_id),public_id:result.comment_id?String(result.comment_id):null,publication_performed:false};
+  }finally{await browser.close().catch(()=>{});}
+}
