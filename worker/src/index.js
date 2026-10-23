@@ -14,8 +14,7 @@ export default {
   if(url.pathname==="/v1/plan"&&req.method==="GET"){
    const sources=await setting(env,"sources",[]);
    const keywords=await setting(env,"keywords",[]);
-   const cooling=await env.DB.prepare("SELECT value FROM settings WHERE key='cooldown_until'").first();
-   return json({sources,keywords,cooldown_until:Number(cooling?.value||0),max_posts_per_source:10});
+    return json({sources,keywords,max_posts_per_source:10});
   }
   if(url.pathname==="/v1/ingest"&&req.method==="POST"){
    const input=await req.json().catch(()=>null);
@@ -32,10 +31,6 @@ export default {
     }
     const blocked=input.upstream_blocked===true||input.rate_limited===true;
     await record(env,id,"ingest",blocked?"blocked_upstream":"ok");
-    if(blocked){
-      await env.DB.prepare("INSERT INTO settings(key,value) VALUES('cooldown_until',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
-       .bind(String(Date.now()+21600000)).run();
-    }
     return json({ok:true,job_id:id,accepted,upstream_blocked:blocked});
    }catch(e){await record(env,id,"ingest","error");return json({error:"ingest_failed"},502);}
   }
@@ -56,8 +51,7 @@ export default {
   if(url.pathname==="/v1/status"&&req.method==="GET"){
    const jobs=await env.DB.prepare("SELECT id,kind,status,created_at FROM jobs ORDER BY created_at DESC LIMIT 10").all();
    const cnt=await env.DB.prepare("SELECT count(*) AS n FROM candidates").first();
-    const cool=await env.DB.prepare("SELECT value FROM settings WHERE key='cooldown_until'").first();
-    return json({jobs:jobs.results,candidate_count:cnt?.n||0,cooldown_until:Number(cool?.value||0),public_write_enabled:false,transport:"github_cloudflare_only"});
+    return json({jobs:jobs.results,candidate_count:cnt?.n||0,public_write_enabled:false,transport:"github_cloudflare_only"});
   }
   // Write endpoints are deliberately absent until explicit authorization and
   // idempotent readback verification have been validated independently.

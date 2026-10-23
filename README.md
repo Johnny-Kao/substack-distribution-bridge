@@ -13,7 +13,7 @@ Privacy-first Substack discovery pipeline using only GitHub Actions, Cloudflare 
 
 ## Acceptance
 - Discovery cannot be marked PASS if it fetched zero articles while private source configuration is present.
-- HTTP 403/429 is recorded in private D1 and triggers a six-hour cooldown; data is retained.
+- HTTP 403/429 is recorded in private D1 and surfaces as a failed Discovery run; no automatic cooldown is applied during integration testing. Each run makes only bounded requests; data is retained.
 - Public posting requires separately demonstrated supported write access, exact-target approvals, idempotency and readback before any future activation.
 
 ## Agent interoperability

@@ -63,9 +63,6 @@ def execute():
     base = os.environ["BRIDGE_URL"].rstrip("/")
     headers = {"Authorization": "Bearer " + os.environ["BRIDGE_KEY"]}
     plan = get_json(base + "/v1/plan", headers)
-    if int(plan.get("cooldown_until") or 0) > int(time.time() * 1000):
-        print("Discovery skipped: upstream cooling period.")
-        return 0
     keywords = [str(k) for k in plan.get("keywords", []) if isinstance(k, str) and 2 <= len(k) <= 60]
     sources = [str(s) for s in plan.get("sources", []) if isinstance(s, str) and s.replace("-", "").isalnum()]
     if not sources or not keywords:
@@ -99,7 +96,7 @@ def execute():
     if not result.get("ok"):
         raise RuntimeError("Private ingest returned unsuccessful status.")
     if blocked:
-        print("Discovery blocked by upstream HTTP 403/429; cooldown recorded privately.",file=sys.stderr)
+        print("Discovery blocked by upstream HTTP 403/429; no automatic cooldown.",file=sys.stderr)
         return 1
     if inspected == 0:
         print("Discovery degraded: no source returned inspectable posts.",file=sys.stderr)

@@ -20,7 +20,7 @@ class DiscoveryTests(unittest.TestCase):
         reports=[]
         def response(url,*args,**kwargs):
             if url.endswith("/v1/plan"):
-                return {"sources":["samplepub"],"keywords":["family office"],"max_posts_per_source":10}
+                return {"sources":["samplepub"],"keywords":["family office"],"max_posts_per_source":10,"cooldown_until":9999999999999}
             if url.endswith("/v1/ingest"):
                 reports.append(args[1])
                 return {"ok":True,"accepted":0}
