@@ -91,6 +91,10 @@ jobs:
                   if result.get('persisted') is not False or result.get('publication_performed') is not False:
                       raise SystemExit('Validation-only safety invariant violated')
                   print('Encrypted owner selection validation PASS; no D1 or Substack writes')
+              elif result.get('ingress_test_only') is True:
+                  if result.get('persisted') is not True or result.get('readback_verified') is not True or result.get('publication_performed') is not False or result.get('dispatch') != 'disabled_for_test':
+                      raise SystemExit('Non-executable D1 ingress smoke invariant violated')
+                  print('Encrypted OIDC-to-D1 test persistence and readback PASS; no Like jobs created')
               else:
                   print('Owner batch accepted: Like='+str(selected.get('like',0))+
                         ', Skip='+str(selected.get('skip',0))+
