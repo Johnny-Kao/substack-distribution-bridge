@@ -21,7 +21,7 @@ function fixture({approved=true,halted=false,kind="like",body="",prior=null,quot
   const stmt={sql,params:[],bind(...args){this.params=args;return this;},
    async first(){
     if(sql.includes("FROM write_policy"))return {halted:halted?1:0};
-    if(sql.includes("FROM proposals p JOIN global_posts"))return approved?proposal:null;
+    if(sql.includes("FROM proposals p LEFT JOIN global_posts"))return approved?proposal:null;
     if(sql.includes("FROM operations WHERE id="))return prior;
     if(sql.includes("COUNT(*) AS n"))return {n:quota};
     return null;
