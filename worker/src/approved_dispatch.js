@@ -8,7 +8,7 @@ export async function executeOneApprovedDecision(env,{perform=runAuthorizedPostA
  const db=env.DB;
  const policy=await db.prepare("SELECT halted FROM write_policy WHERE id=1").first();
  if(policy?.halted)return {ok:true,status:"paused",publication_performed:false};
- const row=await db.prepare("SELECT p.id,p.kind,p.target,p.body,p.body_hash,g.id AS post_id FROM proposals p JOIN global_posts g ON g.url=p.target WHERE p.state='approved' AND p.origin=? AND p.kind IN ('like','comment') ORDER BY p.approved_at,p.created_at LIMIT 1").bind(AUTO_ORIGIN).first();
+ const row=await db.prepare("SELECT p.id,p.kind,p.target,p.body,p.body_hash,COALESCE(g.id,a.post_id) AS post_id FROM proposals p LEFT JOIN global_posts g ON g.url=p.target LEFT JOIN approved_external_posts a ON a.url=p.target WHERE COALESCE(g.id,a.post_id) IS NOT NULL AND p.state='approved' AND p.origin=? AND p.kind IN ('like','comment') ORDER BY p.approved_at,p.created_at LIMIT 1").bind(AUTO_ORIGIN).first();
  if(!row)return {ok:true,status:"no_approved_work",publication_performed:false};
  if(!Number.isSafeInteger(row.post_id)||row.post_id<1)return {ok:false,status:"invalid_post",publication_performed:false};
  const check=await sha256(row.kind+"\u0000"+row.target+"\u0000"+row.body);
