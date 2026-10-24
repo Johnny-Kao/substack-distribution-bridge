@@ -191,12 +191,18 @@ export default {
     // BRIDGE_KEY is only a timer signal. Request cannot choose or approve an action.
     // Owner-approved proposal hash, origin, write policy, and DB execution lock
     // remain mandatory inside executeOneApprovedDecision.
-    const slot=Math.floor(Date.now()/3600000); // at most one approved dispatch per UTC hour
-    const jobId="approved_dispatch_"+slot;
+    // Each hourly batch has 20 separately idempotent steps, rather than one
+    // operation per hour. Only step zero may service an approved Comment.
+    // Additional steps are restricted to individually approved Likes.
+    const requestBody=await req.json().catch(()=>({}));
+    const step=requestBody?.step===undefined?0:requestBody.step;
+    if(!Number.isSafeInteger(step)||step<0||step>=20)return json({ok:false,status:"invalid_batch_step",publication_performed:false},400);
+    const slot=Math.floor(Date.now()/3600000);
+    const jobId="approved_dispatch_"+slot+"_"+step;
     const acquired=await env.DB.prepare("INSERT OR IGNORE INTO jobs(id,kind,status) VALUES(?,'approved_dispatch','running')").bind(jobId).run();
     if(!acquired.meta?.changes)return json({ok:true,status:"already_triggered_this_slot",publication_performed:false});
     try{
-     const outcome=await executeOneApprovedDecision(env);
+     const outcome=await executeOneApprovedDecision(env,{likeOnly:step>0});
      // Old terminal article bodies are compacted; IDs and execution audits remain.
      try{await expireStaleCandidates(env);await pruneTerminalArticleText(env);}catch{}
      await env.DB.prepare("UPDATE jobs SET status=? WHERE id=?").bind(String(outcome.status).slice(0,80),jobId).run();
