@@ -33,9 +33,9 @@ export async function screenGlobalCandidates(env) {
   ].join(" ");
   let result;
   try{
-    // This variant is on Cloudflare's JSON Mode supported-model list. The
-    // previously used *-instruct-fast variant had inconsistent JSON support.
-    result=await env.AI.run("@cf/meta/llama-3.1-8b-instruct",{
+    // Llama 3.1 8B non-fast was deprecated May 30, 2026.
+    // This active 3.3 70B fast model supports JSON schema mode.
+    result=await env.AI.run("@cf/meta/llama-3.3-70b-instruct-fp8-fast",{
       messages:[
         {role:"system",content:instructions},
         {role:"user",content:"Title: "+candidate.title+"\nExcerpt:\n"+candidate.evidence_excerpt.slice(0,3500)}
