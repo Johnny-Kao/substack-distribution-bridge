@@ -5,6 +5,7 @@ import { runSubjectDiscovery } from './subject_discovery.js';
 import {globalContentStep} from './global_content.js';
 import {screenGlobalCandidates} from './global_screening.js';
 import {deepReviewCandidates} from './deep_screening.js';
+import {executeOneApprovedDecision} from './approved_dispatch.js';
 import {readOneGlobalArticle} from './global_article.js';
 import {verifyCloudPostLike,verifyCloudCommentReadback,runAuthorizedPostAction,verifyExactCloudComment} from './cloud_substack_writes.js';
 import {withBrowserBudget} from './browser_budget.js';
@@ -256,5 +257,10 @@ export default {
   // Write endpoints are deliberately absent until explicit authorization and
   // idempotent readback verification have been validated independently.
   return json({error:"not_found"},404);
+ },
+ async scheduled(_event,env,ctx){
+  // Cron has no BRIDGE_KEY or OWNER_WRITE_KEY: DB approval is the capability.
+  // A proposal must already have been approved with its exact body hash.
+  ctx.waitUntil(executeOneApprovedDecision(env).catch(()=>({ok:false,status:"dispatch_exception"})));
  }
 };
