@@ -29,6 +29,34 @@ class CloudGlobalRunnerTests(unittest.TestCase):
         self.assertEqual(sleep.call_count, 3)
         sleep.assert_any_call(17)
 
+    def test_ten_full_article_read_limit(self):
+        reads=0
+        calls=[]
+        def fake(url,headers,payload,timeout):
+            nonlocal reads
+            endpoint=url.split("/v1/")[-1]
+            calls.append(endpoint)
+            if endpoint=="global/step":
+                return {"ok":True,"returned":20,"new_posts":16,"prequalified":10,"stored_total":250}
+            if endpoint=="global/read":
+                reads+=1
+                return {"ok":True,"full_read":1}
+            if endpoint=="global/screen":
+                return {"ok":True,"reviewed":0,"reason":"unavailable_or_daily_cap"}
+            if endpoint=="global/deep-review":
+                return {"ok":True,"reviewed":0,"reason":"ai_daily_cap"}
+            if endpoint=="global/read-discussion":
+                return {"ok":True,"read":0,"reason":"no_pending_comment_thread"}
+            if endpoint=="global/comment-draft":
+                return {"ok":True,"drafted":0,"reason":"ai_daily_cap"}
+            self.fail("Unexpected private route")
+        with patch.dict(os.environ,{"BRIDGE_URL":"https://bridge.example","BRIDGE_KEY":"dummy"}),patch.object(run_global_step,"get_json",side_effect=fake),patch.object(run_global_step.time,"sleep") as delay:
+            self.assertEqual(run_global_step.execute(),0)
+        self.assertEqual(reads,10)
+        self.assertEqual(calls.count("global/read"),10)
+        self.assertEqual(delay.call_count,10)
+        delay.assert_any_call(17)
+
     def test_empty_queue_does_not_call_ai(self):
         calls=[]
         def fake(url, headers, payload, timeout):
