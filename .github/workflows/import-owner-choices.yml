@@ -20,6 +20,8 @@ jobs:
       BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
       - name: Verify GitHub-issued owner/workflow identity before importing
         shell: bash
         run: |
@@ -85,8 +87,13 @@ jobs:
               with urllib.request.urlopen(req,timeout=65) as r: result=json.load(r)
               if result.get('ok') is not True:raise SystemExit('Encrypted owner-choice import failed')
               selected=result.get('selected',{})
-              print('Owner batch accepted: Like='+str(selected.get('like',0))+
-                    ', Skip='+str(selected.get('skip',0))+
-                    ', already recorded='+str(result.get('already_recorded',False)))
+              if result.get('validation_only') is True:
+                  if result.get('persisted') is not False or result.get('publication_performed') is not False:
+                      raise SystemExit('Validation-only safety invariant violated')
+                  print('Encrypted owner selection validation PASS; no D1 or Substack writes')
+              else:
+                  print('Owner batch accepted: Like='+str(selected.get('like',0))+
+                        ', Skip='+str(selected.get('skip',0))+
+                        ', already recorded='+str(result.get('already_recorded',False)))
           print('No private article names, URLs, decisions, tokens or comments printed')
           PY
