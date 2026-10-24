@@ -69,6 +69,25 @@ def execute():
         if not count:
             break
     print("Private semantic screening completed; reviewed="+str(reviewed)+".")
+    # Second-stage deep assessment is independent and read-only; it draws
+    # private stored article text, not the 3500-character stage-one excerpt.
+    try:
+        deep = get_json(base+"/v1/global/deep-review", headers, payload={}, timeout=100)
+    except (HTTPError, URLError, TimeoutError, ValueError):
+        print("Deep semantic review unavailable; no public action attempted.",file=sys.stderr)
+        return 1
+    if deep.get("ok") is not True:
+        reason=deep.get("reason")
+        safe=reason if reason in ("deep_ai_inference_failed","invalid_deep_verdict") else "unknown_deep_failure"
+        print("Deep semantic review failed; category="+safe+".",file=sys.stderr)
+        return 1
+    deep_count=int(deep.get("reviewed",0))
+    if deep_count:
+        print("Deep semantic review completed; reviewed="+str(deep_count)+".")
+    else:
+        why=deep.get("reason")
+        safe=why if why in ("no_qualified_candidate","ai_daily_cap","ai_not_configured") else "unknown"
+        print("Deep semantic review deferred; category="+safe+".")
     return 0
 
 if __name__=="__main__":
