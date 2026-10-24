@@ -68,12 +68,16 @@ export async function runAuthorizedPostAction(env,{target,kind,body="",postId,ap
     if(kind==="comment"&&(!body.trim()||body.length>750))throw Error("invalid_comment");
     const write=await page.evaluate(async args=>{
       const endpoint="/api/v1/post/"+args.id+(args.kind==="like"?"/reaction":"/comment");
-      const payload=args.kind==="like"?{reaction:args.emoji}:{body:args.body,parent_id:null};
+      // Current Substack reader-comment endpoint requires only body.
+      // Omit parent_id for top-level comments; do not send a null property.
+      const payload=args.kind==="like"?{reaction:args.emoji}:{body:args.body};
       const result=await fetch(endpoint,{method:"POST",credentials:"include",headers:{"content-type":"application/json","accept":"application/json"},body:JSON.stringify(payload)});
       const data=await result.json().catch(()=>null);
-      return {ok:result.ok,status:result.status,id:args.kind==="comment"?Number(data?.id)||null:null};
+      const reason=String(data?.error||data?.message||data?.errors?.[0]?.msg||"").toLowerCase();
+      const category=/subscribe|subscription/.test(reason)?"subscription_required":/permission|not allowed|unauthoriz|forbidden/.test(reason)?"permission_denied":/captcha|challenge|verify/.test(reason)?"verification_required":/spam|rate.limit|too many/.test(reason)?"rate_limited":/body|comment|text|invalid/.test(reason)?"comment_invalid":"unclassified";
+      return {ok:result.ok,status:result.status,id:args.kind==="comment"?Number(data?.id)||null:null,category};
     },{id:postId,kind,body,emoji:likeEmoji});
-    if(!write.ok)throw Error("substack_action_rejected_"+write.status);
+    if(!write.ok)throw Error("substack_action_rejected_"+write.status+"_"+write.category);
     const after=await verify();
     if(kind==="like"){
       if(after.ok&&after.reaction)return {ok:true,status:"liked",verified:true,publication_performed:true};
