@@ -61,7 +61,7 @@ export async function enqueueOwnerChoices(env,input){
      (existing?.state==="unknown"||existing?.state==="executing"||priorWrite?.status==="unknown"||priorWrite?.status==="executing"))
    return {ok:false,error:"unresolved_target_requires_readback",status:409,publication_performed:false};
   if(entry.choice==="like"&&existing&&
-     (existing.body_hash!==await sha256("like\\u0000"+entry.url+"\\u0000")||
+     (existing.body_hash!==await sha256("like\u0000"+entry.url+"\u0000")||
       !["proposed","approved","executed"].includes(existing.state)))
    return {ok:false,error:"existing_proposal_not_compatible",status:409,publication_performed:false};
   if(entry.choice==="like"&&existing?.state==="rejected")
