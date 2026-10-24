@@ -45,6 +45,7 @@ export async function enqueueOwnerChoices(env,input){
  const digest=await sha256(JSON.stringify(items));
  await db.prepare("CREATE TABLE IF NOT EXISTS owner_choice_batches (batch_id TEXT PRIMARY KEY,selection_hash TEXT NOT NULL,item_count INTEGER NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP)").run();
  await db.prepare("CREATE TABLE IF NOT EXISTS approved_external_posts (url TEXT PRIMARY KEY,post_id INTEGER NOT NULL,imported_at TEXT DEFAULT CURRENT_TIMESTAMP)").run();
+ await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_approved_external_posts_post_id ON approved_external_posts(post_id)").run();
  await db.prepare("CREATE TABLE IF NOT EXISTS owner_batch_items (batch_id TEXT NOT NULL,post_id INTEGER NOT NULL,url TEXT NOT NULL,choice TEXT NOT NULL,PRIMARY KEY(batch_id,post_id))").run();
  const prior=await db.prepare("SELECT selection_hash,item_count FROM owner_choice_batches WHERE batch_id=?").bind(batch_id).first();
  if(prior&&prior.selection_hash!==digest)return {ok:false,error:"batch_id_reused_with_different_choices",status:409,publication_performed:false};
@@ -86,7 +87,7 @@ export async function enqueueOwnerChoices(env,input){
   actions.push(db.prepare("INSERT INTO owner_batch_items(batch_id,post_id,url,choice) VALUES(?,?,?,?)").bind(batch_id,p.post_id,p.url,p.choice));
   actions.push(db.prepare("INSERT OR IGNORE INTO candidates(id,pub,title,url) VALUES(?,?,?,?)")
     .bind(candidateId,p.subdomain,p.title,p.url));
-  actions.push(db.prepare("INSERT OR IGNORE INTO approved_external_posts(url,post_id) VALUES(?,?)")
+  actions.push(db.prepare("INSERT INTO approved_external_posts(url,post_id) VALUES(?,?) ON CONFLICT(url) DO NOTHING")
     .bind(p.url,p.post_id));
   actions.push(db.prepare("INSERT OR IGNORE INTO interaction_feedback(id,candidate_id,choice,source,reason,suggested_action,actual_body,outcome) VALUES(?,?,?,'owner_choice',?,?,'','selected')")
     .bind("owner_choice:"+batch_id+":"+p.post_id,candidateId,p.choice,p.reason,p.choice));
@@ -94,7 +95,7 @@ export async function enqueueOwnerChoices(env,input){
    if(!p.existing&&!p.priorWrite){
     actions.push(db.prepare("INSERT OR IGNORE INTO proposals(id,kind,target,body,body_hash,origin,state,approved_at) VALUES(?,'like',?,'',?,'decision_pipeline_v1','approved',CURRENT_TIMESTAMP)")
       .bind(p.id,p.url,p.hash));
-   }else if(p.existing?.state==="proposed"||p.existing?.state==="approved"){
+   }else if(p.priorWrite?.status!=="succeeded"&&(p.existing?.state==="proposed"||p.existing?.state==="approved")){
     actions.push(db.prepare("UPDATE proposals SET state='approved',origin='decision_pipeline_v1',approved_at=COALESCE(approved_at,CURRENT_TIMESTAMP) WHERE id=? AND state IN ('proposed','approved') AND body_hash=?")
       .bind(p.existing.id,p.hash));
    }
