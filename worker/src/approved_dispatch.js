@@ -9,6 +9,10 @@ export async function executeOneApprovedDecision(env,{perform=runAuthorizedPostA
  const db=env.DB;
  const policy=await db.prepare("SELECT halted FROM write_policy WHERE id=1").first();
  if(policy?.halted)return {ok:true,status:"paused",publication_performed:false};
+ // A Worker process can terminate after the upstream POST but before saving
+ // success/failure. No other approved item may run while such a claim exists.
+ const unresolved=await db.prepare("SELECT COUNT(*) AS n FROM operations WHERE status IN ('executing','unknown')").first();
+ if(Number(unresolved?.n||0)>0)return {ok:true,status:"needs_reconciliation",publication_performed:false};
  const row=await db.prepare("SELECT p.id,p.kind,p.target,p.body,p.body_hash,COALESCE(g.id,a.post_id) AS post_id FROM proposals p LEFT JOIN global_posts g ON g.url=p.target LEFT JOIN approved_external_posts a ON a.url=p.target WHERE COALESCE(g.id,a.post_id) IS NOT NULL AND p.state='approved' AND p.origin=? AND p.kind IN ('like','comment') AND (?=0 OR p.kind='like') ORDER BY p.approved_at,p.created_at LIMIT 1").bind(AUTO_ORIGIN,likeOnly?1:0).first();
  if(!row)return {ok:true,status:"no_approved_work",publication_performed:false};
  if(!Number.isSafeInteger(row.post_id)||row.post_id<1)return {ok:false,status:"invalid_post",publication_performed:false};
