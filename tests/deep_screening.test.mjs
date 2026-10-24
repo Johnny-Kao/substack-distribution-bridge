@@ -42,3 +42,23 @@ test("no relevant candidate does not spend AI",async()=>{
  const result=await deepReviewCandidates({AI,DB});
  assert.equal(result.reason,"no_qualified_candidate");assert.equal(result.reviewed,0);
 });
+
+test("unstructured GPT-OSS verdict makes exactly one deterministic JSON-schema fallback",async()=>{
+ const DB=db();const models=[];
+ const AI={async run(model,args){
+  models.push({model,args});
+  if(models.length===1)return {response:"non-json reasoning"};
+  return {response:JSON.stringify(response)};
+ }};
+ const outcome=await deepReviewCandidates({DB,AI});
+ assert.equal(outcome.ok,true);assert.equal(outcome.reviewed,1);
+ assert.deepEqual(models.map(x=>x.model),[DEEP_MODEL,"@cf/meta/llama-3.3-70b-instruct-fp8-fast"]);
+ assert.equal(models[1].args.response_format.type,"json_schema");
+ assert.equal(JSON.parse(DB.calls[0][0].args[0]).model,"@cf/meta/llama-3.3-70b-instruct-fp8-fast");
+});
+test("both model outputs invalid fail closed and keep original article pending",async()=>{
+ const DB=db(),AI={run:async()=>({response:"No structured output"})};
+ const result=await deepReviewCandidates({AI,DB});
+ assert.equal(result.reason,"invalid_deep_verdict");assert.equal(DB.calls.length,0);
+ assert.equal(DB.attempts.length,1);
+});
