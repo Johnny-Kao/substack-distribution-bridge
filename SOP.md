@@ -62,3 +62,9 @@ Private targeting weights, source lists, draft histories, engagement evidence, r
 - Candidate comments need a verified stored discussion snapshot, exact English body, and specific owner approval. `comment_review` is not publishing permission.
 - Idempotent feedback-table bootstrap uses the Worker D1 binding because the existing Cloudflare deployment token deliberately lacks direct D1 import permissions. GitHub does not receive owner write credentials or individual feedback records.
 - Browser quotas, daily AI allowance and Substack upstream failures can reduce actual reads below ten; report this accurately rather than treating the maximum as guaranteed.
+
+## 20 Like actions per hourly approved batch (2026-10-25)
+- Every hour, the free GitHub runner may signal up to twenty individually approved D1 proposals. The Cloudflare endpoint uses an hour+step atomic lock; steps 1–19 are Like-only, while step zero retains compatibility with a separately approved Comment.
+- Like execution cap: 20 per rolling 24 hours across the system. D1 Browser Run still uses its unchanged 15-second gate, general action cap of 44/24h and 390s measured browser time/24h. The runner waits 17 seconds between dispatch calls. No paid overage or new Cloudflare Cron triggers are allowed.
+- Each approved task is verified separately against the live Substack account. Stop the batch if there are no approved tasks, quota is exhausted or a write outcome is unknown. Preserve unexecuted approvals for future hourly runs; never replay uncertain writes.
+- Verified unit acceptance: 57 JS and 18 Python tests with cloud deployment #40116063090. Live multiple-Like batch outcome requires separate GitHub Actions evidence.
