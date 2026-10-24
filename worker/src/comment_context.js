@@ -17,7 +17,7 @@ export function normalizeCommentThread(payload,max=20){
   for(const key of ["children","replies","comments"])if(Array.isArray(v[key]))walk(v[key],depth+1);
  }
  walk(payload.comments);
- return {comments:result,visible_count:payload.comments.length,sampled:result.length,possibly_truncated:payload.comments.length>max||result.length>=max};
+ return {comments:result,visible_count:payload.comments.length,sampled:result.length,possibly_truncated:payload.comments.length>max||result.length>=max||payload.more===true||payload.has_more===true||Boolean(payload.next_cursor)};
 }
 export async function fetchAuthenticatedThread(env,{target,postId}){
  const loc=parsePostTarget(target);
