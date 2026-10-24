@@ -18,7 +18,19 @@ SUCCESS_STATES = {
 }
 DEFER_STATES = {
     "no_approved_work", "paused", "daily_interaction_cap",
-    "deferred_browser_quota",
+    "deferred_browser_quota", "needs_reconciliation",
+}
+
+class DispatchHTTPError(RuntimeError):
+    """Only safe batch-step and coarse upstream failure metadata may be logged."""
+    def __init__(self, step, code, state):
+        self.step, self.code, self.state = step, code, state
+        super().__init__("cloud_dispatch_failed")
+
+SAFE_ERROR_STATES = {
+    "dispatch_error", "ambiguous_write_halted", "tampered_approval_hash",
+    "previous_execution_unresolved", "invalid_post", "needs_reconciliation",
+    "readback_unverified", "unknown",
 }
 
 def dispatch(base, key, *, transport=None, sleep=time.sleep):
@@ -49,10 +61,20 @@ def submit(base, key, step):
             "User-Agent": "approved-actions-hourly/1.0",
         },
     )
-    with urllib.request.urlopen(req, timeout=115) as resp:
-        if resp.status != 200:
-            raise RuntimeError("cloud_dispatch_http_error")
-        return json.load(resp)
+    try:
+        with urllib.request.urlopen(req, timeout=115) as resp:
+            if resp.status != 200:
+                raise DispatchHTTPError(step, resp.status, "unknown")
+            return json.load(resp)
+    except urllib.error.HTTPError as exc:
+        try:
+            data=json.loads(exc.read(4096))
+            state=data.get("status","unknown")
+        except (ValueError, AttributeError, TypeError):
+            state="unknown"
+        if state not in SAFE_ERROR_STATES:
+            state="unknown"
+        raise DispatchHTTPError(step, exc.code, state) from None
 
 def main():
     try:
@@ -62,9 +84,16 @@ def main():
               + ", already=" + str(counts.get("already_executed", 0))
               + ", declined=" + str(counts.get("declined_permission", 0))
               + ", duplicate_slot=" + str(counts.get("already_triggered_this_slot", 0))
+              + ", paused=" + str(counts.get("paused", 0))
+              + ", unresolved=" + str(counts.get("needs_reconciliation", 0))
               + ", deferred=" + str(sum(counts.get(s, 0) for s in DEFER_STATES))
               + ", upper_limit=" + str(MAX_STEPS))
         return 0
+    except DispatchHTTPError as exc:
+        print("Approved batch: FAIL; step=" + str(exc.step)
+              + "; HTTP=" + str(exc.code) + "; category=" + exc.state
+              + "; no automatic retry", file=sys.stderr)
+        return 1
     except (KeyError, ValueError, OSError, urllib.error.URLError, RuntimeError) as exc:
         # Never log response bodies or authentication keys.
         print("Approved batch: FAIL, check private Cloudflare logs; "
