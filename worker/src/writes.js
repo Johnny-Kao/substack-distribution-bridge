@@ -4,6 +4,7 @@ import {ownerSubjectProbe} from "./subject.js";
 import {verifyCloudPostLike,runAuthorizedPostAction} from "./cloud_substack_writes.js";
 import {withBrowserBudget} from "./browser_budget.js";
 import {listDecisionOutbox,stageApprovedDecisionCandidate} from "./action_pipeline.js";
+import {recordFeedback,feedbackEventId,feedbackStats} from "./feedback_learning.js";
 const reply=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 const kinds=new Set(["like","comment","note"]);
 const limits={like:10,comment:3,note:2};
@@ -86,6 +87,27 @@ async function innerWriteHandler(request,env,url){
    const outcome=await stageApprovedDecisionCandidate(env,{id:input?.id,kind:input?.kind,body:input?.body,discussionReviewed:input?.discussion_reviewed===true});
    return reply(outcome,outcome.ok?200:outcome.status||409);
  }
+ if(url.pathname==="/v1/write/learning-summary"&&request.method==="GET"){
+  return reply({ok:true,counts:await feedbackStats(env),method:"private_in_context_preference_learning",publication_performed:false});
+ }
+ if(url.pathname==="/v1/write/feedback"&&request.method==="POST"){
+  const input=await request.json().catch(()=>null);
+  if(typeof input?.id!=="string"||input.id.length>180||!["like","comment","skip"].includes(input.choice))return reply({error:"invalid_owner_feedback"},400);
+  if(input.event_id!==undefined&&(typeof input.event_id!=="string"||!/^[a-zA-Z0-9_-]{8,100}$/.test(input.event_id)))return reply({error:"invalid_feedback_event_id"},400);
+  const id=feedbackEventId("owner_choice",input.event_id||crypto.randomUUID());
+  const result=await recordFeedback(env,{id,candidateId:input.id,choice:input.choice,source:"owner_choice",reason:input.reason||"",body:input.edited_body||""});
+  return reply(result,result.ok?200:400);
+ }
+ if(url.pathname==="/v1/write/reject-decision"&&request.method==="POST"){
+  const input=await request.json().catch(()=>null);
+  if(!goodId(input?.proposal_id)||typeof input?.reason!=="string"||input.reason.length>500)return reply({error:"invalid_rejection"},400);
+  const proposal=await db.prepare("SELECT p.id,p.kind,p.state,c.id AS candidate_id FROM proposals p JOIN candidates c ON c.url=p.target WHERE p.id=? AND p.origin='decision_pipeline_v1'").bind(input.proposal_id).first();
+  if(!proposal||!["proposed","approved"].includes(proposal.state))return reply({error:"proposal_not_rejectable"},409);
+  const updated=await db.prepare("UPDATE proposals SET state='rejected' WHERE id=? AND state IN ('proposed','approved') AND origin='decision_pipeline_v1'").bind(input.proposal_id).run();
+  if(!updated.meta?.changes)return reply({error:"proposal_not_rejectable"},409);
+  const recorded=await recordFeedback(env,{id:feedbackEventId("owner_rejection",input.proposal_id),candidateId:proposal.candidate_id,choice:"skip",source:"owner_rejection",reason:input.reason,outcome:"rejected"});
+  return reply({ok:true,rejected:true,feedback_recorded:recorded.recorded===true,publication_performed:false});
+ }
  if(url.pathname==="/v1/write/engagement-targets"&&request.method==="GET"){
   const rows=await db.prepare("SELECT c.id,c.pub,c.title,c.url,c.published,t.score,t.suggested_action,t.word_count,t.evidence_excerpt,t.evidence_signals,t.review_state,t.semantic_verdict,t.semantic_rationale,t.comment_angle,EXISTS(SELECT 1 FROM operations o WHERE o.target=c.url AND o.kind IN ('like','comment') AND o.status IN ('executing','succeeded','unknown')) AS already_handled FROM engagement_targets t JOIN candidates c ON c.id=t.id ORDER BY (t.review_state='pending_semantic_review') DESC,t.score DESC,c.created_at DESC LIMIT 25").all();
   return reply({ok:true,targets:rows.results.map(x=>({...x,evidence_signals:JSON.parse(x.evidence_signals),already_handled:!!x.already_handled})),publication_performed:false});
@@ -135,8 +157,13 @@ async function innerWriteHandler(request,env,url){
     if(!row||row.state!=="proposed"||row.body_hash!==item.hash)return reply({error:"approval_mismatch"},409);
   }
   // Transactional batch; D1 batch executes atomically and prevents partial approval.
-  await db.batch(input.items.map(item=>db.prepare("UPDATE proposals SET state='approved',approved_at=CURRENT_TIMESTAMP WHERE id=? AND state='proposed' AND body_hash=?").bind(item.id,item.hash)));
-  return reply({ok:true,approved:input.items.length,publication_performed:false});
+  const changes=[];
+  for(const item of input.items){
+   changes.push(db.prepare("UPDATE proposals SET state='approved',approved_at=CURRENT_TIMESTAMP WHERE id=? AND state='proposed' AND body_hash=?").bind(item.id,item.hash));
+   changes.push(db.prepare("INSERT OR IGNORE INTO interaction_feedback(id,candidate_id,choice,source,reason,suggested_action,actual_body,outcome) SELECT ?,c.id,p.kind,'owner_approval','',COALESCE(t.suggested_action,''),p.body,'approved' FROM proposals p JOIN candidates c ON c.url=p.target LEFT JOIN engagement_targets t ON t.id=c.id WHERE p.id=? AND p.kind IN ('like','comment')").bind(feedbackEventId("owner_approval",item.id),item.id));
+  }
+  await db.batch(changes);
+  return reply({ok:true,approved:input.items.length,feedback_capture:"atomic_for_known_candidates",publication_performed:false});
  }
  if(url.pathname==="/v1/write/status"&&request.method==="GET"){
   const state=await halted(db);const rows=await db.prepare("SELECT id,kind,origin,state,created_at FROM proposals ORDER BY created_at DESC LIMIT 20").all();
