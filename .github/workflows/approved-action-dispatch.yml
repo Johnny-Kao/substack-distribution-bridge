@@ -1,0 +1,42 @@
+name: Execute owner-approved Substack decisions (cloud only)
+on:
+  schedule:
+    - cron: '53 */3 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: substack-approved-outbox-clock
+  cancel-in-progress: false
+jobs:
+  approved-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    env:
+      BRIDGE_URL: ${{ vars.BRIDGE_URL }}
+      BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
+    steps:
+      - name: Tick Cloudflare owner-approved outbox; never submit content or approval
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${BRIDGE_URL:-}" == https://* ]] && [[ -n "${BRIDGE_KEY:-}" ]] || { echo "Bridge not configured"; exit 1; }
+          http=$(curl --silent --show-error --retry 0 --max-time 120 \
+            -o /tmp/approved-outbox.json -w '%{http_code}' \
+            -X POST "${BRIDGE_URL%/}/v1/global/dispatch-approved" \
+            -H "Authorization: Bearer ${BRIDGE_KEY}" \
+            -H 'Content-Type: application/json' -d '{}')
+          python3 - "$http" <<'PY'
+          import json,sys
+          try:data=json.load(open('/tmp/approved-outbox.json',encoding='utf-8'))
+          except Exception:data={}
+          code=int(sys.argv[1])
+          safe={'no_approved_work','paused','already_triggered_this_slot','verified_executed',
+                'already_executed','claimed_elsewhere','daily_interaction_cap','deferred_browser_quota'}
+          status=data.get('status')
+          label=status if status in safe else 'failure_or_uncertain'
+          ok=code==200 and data.get('ok') is True and status in safe
+          print('Cloud approved-action dispatcher: '+('PASS' if ok else 'FAIL')+'; state='+label+'; HTTP '+str(code))
+          print('This Action cannot choose targets, draft content, or approve anything.')
+          sys.exit(0 if ok else 1)
+          PY
