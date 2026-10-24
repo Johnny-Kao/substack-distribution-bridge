@@ -11,8 +11,22 @@ def execute():
     try:
         result=get_json(base+"/v1/global/step",headers,payload={},timeout=55)
     except HTTPError as error:
-        print("Global content discovery unavailable; status "+str(error.code),file=sys.stderr)
-        return 1
+        if error.code==429:
+            # Could be the 15-second shared browser pacing gate. Only one
+            # delayed retry is permitted; rolling quota exhaustion stays FAIL.
+            print("Global browser pacing or free quota; one bounded 17s retry.",file=sys.stderr)
+            time.sleep(17)
+            try:
+                result=get_json(base+"/v1/global/step",headers,payload={},timeout=55)
+            except HTTPError as retry:
+                print("Global content discovery deferred; HTTP "+str(retry.code),file=sys.stderr)
+                return 1
+            except (URLError,TimeoutError,ValueError):
+                print("Global content retry unavailable.",file=sys.stderr)
+                return 1
+        else:
+            print("Global content discovery unavailable; status "+str(error.code),file=sys.stderr)
+            return 1
     except (URLError,TimeoutError,ValueError):
         print("Global content discovery transport or response error.",file=sys.stderr)
         return 1
