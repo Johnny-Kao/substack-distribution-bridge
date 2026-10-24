@@ -43,9 +43,9 @@ test("AI exception is a safe failure, not success or publication",async()=>{
   assert.equal(db.updated.length,0);
 });
 
-test("stage-one cap preserves two of eight AI slots for deep review",async()=>{
+test("stage-one cap preserves two deep slots and one draft slot within eight calls",async()=>{
  let aiCalled=false;
- const DB={prepare(sql){return {async first(){return {n:sql.includes("kind='global_screening'")?6:6};},async all(){return {results:[]};}};}};
+ const DB={prepare(sql){return {async first(){return {n:sql.includes("kind='global_screening'")?5:5};},async all(){return {results:[]};}};}};
  const AI={run:async()=>{aiCalled=true;return {}; }};
  const result=await screenGlobalCandidates({DB,AI});
  assert.equal(result.ok,true);
