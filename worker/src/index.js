@@ -36,7 +36,7 @@ export default {
       const item=JSON.parse(new TextDecoder().decode(plaintext));
       const id="sealed_"+expected.slice(0,40);
       const row=await env.DB.prepare("SELECT status,public_id FROM operations WHERE id=?").bind(id).first();
-      if(row?.status!=="unknown"||(row.public_id&&row.public_id!=="retry_used"))return json({error:"not_eligible_for_single_recovery",publication_performed:false},409);
+      if(row?.status!=="unknown"||(row.public_id&&!["retry_used","diagnostic_retry_allowed"].includes(row.public_id)))return json({error:"not_eligible_for_single_recovery",publication_performed:false},409);
       try{
         const checked=await withBrowserBudget(env.DB,"sealed_comment_reconcile",()=>verifyExactCloudComment(env,{target:item.target,postId:item.post_id,body:item.body}));
         if(!checked.ok||!checked.verified)return json({error:"independent_readback_unverified",publication_performed:false},503);
@@ -44,7 +44,7 @@ export default {
           await env.DB.prepare("UPDATE operations SET status='succeeded',public_id=? WHERE id=? AND status='unknown' AND public_id IS NULL").bind(checked.public_id,id).run();
           return json({ok:true,verified:true,status:"already_commented",publication_performed:false});
         }
-        const marker=row.public_id==="retry_used"?"diagnostic_retry_allowed":"retry_used";
+        const marker=row.public_id==="diagnostic_retry_allowed"?"minimal_body_retry_allowed":row.public_id==="retry_used"?"diagnostic_retry_allowed":"retry_used";
         const result=await env.DB.prepare("UPDATE operations SET status='reconciled_absent',public_id=? WHERE id=? AND status='unknown' AND COALESCE(public_id,'')=?").bind(marker,id,row.public_id||"").run();
         if(!result.meta?.changes)return json({error:"reconcile_race"},409);
         await env.DB.prepare("UPDATE write_policy SET halted=0,reason=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=1 AND reason='sealed_comment_ambiguous'").run();
@@ -129,7 +129,7 @@ export default {
       const policy=await env.DB.prepare("SELECT halted FROM write_policy WHERE id=1").first();
       if(policy?.halted)return json({error:"write_policy_halted",publication_performed:false},423);
       if(existing){
-        if(!["retry_used","diagnostic_retry_allowed"].includes(existing.public_id))return json({error:"retry_proof_mismatch"},409);
+        if(!["retry_used","diagnostic_retry_allowed","minimal_body_retry_allowed"].includes(existing.public_id))return json({error:"retry_proof_mismatch"},409);
         const claimed=await env.DB.prepare("UPDATE operations SET status='executing' WHERE id=? AND status='reconciled_absent' AND public_id=?").bind(id,existing.public_id).run();
         if(!claimed.meta?.changes)return json({error:"concurrent_or_invalid_retry"},409);
       }else{
