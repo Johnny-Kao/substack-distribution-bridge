@@ -1,12 +1,5 @@
 name: Cloud-only Substack Like verification
 on:
-  push:
-    branches: [master]
-    paths:
-      - "worker/**"
-      - "tests/cloud_like.test.mjs"
-      - "tests/write_policy.test.mjs"
-      - ".github/workflows/cloud-like-verify.yml"
   workflow_dispatch:
 permissions:
   contents: read
