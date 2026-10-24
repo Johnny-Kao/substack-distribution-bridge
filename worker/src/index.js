@@ -261,6 +261,7 @@ export default {
    const targets=await env.DB.prepare("SELECT COUNT(*) AS n FROM engagement_targets").first();
     const global=await env.DB.prepare("SELECT COUNT(*) AS posts,COUNT(DISTINCT publication_id) AS publications,SUM(CASE WHEN full_read_at IS NOT NULL THEN 1 ELSE 0 END) AS full_reads FROM global_posts").first();
     const screening=await env.DB.prepare("SELECT COUNT(*) AS reviewed,SUM(CASE WHEN semantic_verdict='skip' THEN 1 ELSE 0 END) AS skipped,SUM(CASE WHEN semantic_verdict IN ('like_review','comment_review') THEN 1 ELSE 0 END) AS potentially_relevant FROM engagement_targets WHERE json_extract(evidence_signals,'$.origin')='global_post_search' AND review_state='semantically_reviewed'").first();
+    const outbox=await env.DB.prepare("SELECT COUNT(*) AS total,SUM(CASE WHEN state='proposed' THEN 1 ELSE 0 END) AS awaiting_approval,SUM(CASE WHEN state='approved' THEN 1 ELSE 0 END) AS ready_to_execute,SUM(CASE WHEN state='executed' THEN 1 ELSE 0 END) AS completed,SUM(CASE WHEN state='unknown' THEN 1 ELSE 0 END) AS needs_reconciliation FROM proposals WHERE origin='decision_pipeline_v1'").first();
    const topic=await env.DB.prepare("SELECT status,created_at,returned,valid_count FROM subject_search_events ORDER BY created_at DESC LIMIT 1").first();
    const budget=await env.DB.prepare("SELECT COUNT(*) AS n,COALESCE(SUM(browser_ms),0) AS ms FROM browser_requests WHERE created_at>=datetime('now','-1 day')").first();
    return json({
@@ -270,6 +271,7 @@ export default {
      global_posts:global?.posts||0,global_publications:global?.publications||0,global_full_reads:global?.full_reads||0,
      global_semantic_reviewed:screening?.reviewed||0,global_semantic_skipped:screening?.skipped||0,global_semantic_potentially_relevant:screening?.potentially_relevant||0,
      decision_pipeline:"scan_to_deep_review_to_owner_approval_to_verified_execution",
+     action_outbox:{total:outbox?.total||0,awaiting_approval:outbox?.awaiting_approval||0,ready_to_execute:outbox?.ready_to_execute||0,completed:outbox?.completed||0,needs_reconciliation:outbox?.needs_reconciliation||0},
     discovered_publication_count:pubs?.n||0,
     subject_latest:topic?{status:topic.status,created_at:topic.created_at,returned:topic.returned,valid:topic.valid_count}:null,
     browser_requests_24h:budget?.n||0,browser_ms_24h:budget?.ms||0,
