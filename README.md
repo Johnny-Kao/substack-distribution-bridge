@@ -17,7 +17,7 @@ Lower-level RSS/feed parsers and older subject-search functions remain in the re
 
 ## Review and verification
 
-- Workers AI screening reads full article excerpts only. It uses the JSON-Mode supported `@cf/meta/llama-3.1-8b-instruct` model with strict verdict validation and a privacy-safe error category. Malformed output leaves the article in the pending queue instead of recording a fabricated evaluation.
+- Workers AI screening reads full article excerpts only. It uses the JSON-Mode supported `@cf/meta/llama-3.3-70b-instruct-fp8-fast` model with strict verdict validation and a privacy-safe error category. Malformed output leaves the article in the pending queue instead of recording a fabricated evaluation.
 - Each scheduled search must distinguish successful discovery, exhausted free-browser capacity, AI deferred by daily cap, and genuine upstream errors. Do not equate a zero-result page with success if the upstream request failed.
 - Actions are read-only until an exact author-approved target and content are provided. Never publish based on automated discovery scores alone; protect against duplicates and ambiguous retries.
 - Cloudflare free-browser budget and a D1 request pacing gate protect against paid overflow.
