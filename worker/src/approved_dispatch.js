@@ -4,11 +4,12 @@ import {runAuthorizedPostAction} from "./cloud_substack_writes.js";
 import {withBrowserBudget} from "./browser_budget.js";
 import {sha256} from "./action_pipeline.js";
 export const AUTO_ORIGIN="decision_pipeline_v1";
-export async function executeOneApprovedDecision(env,{perform=runAuthorizedPostAction,budget=withBrowserBudget}={}){
+export const MAX_APPROVED_LIKES_24H=20;
+export async function executeOneApprovedDecision(env,{perform=runAuthorizedPostAction,budget=withBrowserBudget,likeOnly=false}={}){
  const db=env.DB;
  const policy=await db.prepare("SELECT halted FROM write_policy WHERE id=1").first();
  if(policy?.halted)return {ok:true,status:"paused",publication_performed:false};
- const row=await db.prepare("SELECT p.id,p.kind,p.target,p.body,p.body_hash,COALESCE(g.id,a.post_id) AS post_id FROM proposals p LEFT JOIN global_posts g ON g.url=p.target LEFT JOIN approved_external_posts a ON a.url=p.target WHERE COALESCE(g.id,a.post_id) IS NOT NULL AND p.state='approved' AND p.origin=? AND p.kind IN ('like','comment') ORDER BY p.approved_at,p.created_at LIMIT 1").bind(AUTO_ORIGIN).first();
+ const row=await db.prepare("SELECT p.id,p.kind,p.target,p.body,p.body_hash,COALESCE(g.id,a.post_id) AS post_id FROM proposals p LEFT JOIN global_posts g ON g.url=p.target LEFT JOIN approved_external_posts a ON a.url=p.target WHERE COALESCE(g.id,a.post_id) IS NOT NULL AND p.state='approved' AND p.origin=? AND p.kind IN ('like','comment') AND (?=0 OR p.kind='like') ORDER BY p.approved_at,p.created_at LIMIT 1").bind(AUTO_ORIGIN,likeOnly?1:0).first();
  if(!row)return {ok:true,status:"no_approved_work",publication_performed:false};
  if(!Number.isSafeInteger(row.post_id)||row.post_id<1)return {ok:false,status:"invalid_post",publication_performed:false};
  const check=await sha256(row.kind+"\u0000"+row.target+"\u0000"+row.body);
@@ -22,7 +23,7 @@ export async function executeOneApprovedDecision(env,{perform=runAuthorizedPostA
   return {ok:false,status:"previous_execution_unresolved",publication_performed:false};
  }
  const recent=await db.prepare("SELECT COUNT(*) AS n FROM operations WHERE kind=? AND status IN ('executing','succeeded','unknown') AND created_at>=datetime('now','-1 day')").bind(row.kind).first();
- if(Number(recent?.n||0)>=(row.kind==="like"?10:3))return {ok:true,status:"daily_interaction_cap",publication_performed:false};
+ if(Number(recent?.n||0)>=(row.kind==="like"?MAX_APPROVED_LIKES_24H:3))return {ok:true,status:"daily_interaction_cap",publication_performed:false};
  const claim=await db.prepare("UPDATE proposals SET state='executing' WHERE id=? AND state='approved' AND origin=? AND body_hash=?").bind(row.id,AUTO_ORIGIN,row.body_hash).run();
  if(!claim.meta?.changes)return {ok:true,status:"claimed_elsewhere",publication_performed:false};
  try{
@@ -40,7 +41,7 @@ export async function executeOneApprovedDecision(env,{perform=runAuthorizedPostA
   if(/^substack_action_rejected_403_/.test(errorCode)){
    // Explicit upstream HTTP 403 is a deterministic rejected POST, not an
    // ambiguous network timeout. Mark this one operation terminal while
-   // allowing other individually approved posts to proceed next hour.
+   // allowing other individually approved posts to proceed in this batch.
    await db.batch([
     db.prepare("UPDATE operations SET status='rejected' WHERE id=? AND status='executing'").bind(row.id),
     db.prepare("UPDATE proposals SET state='rejected' WHERE id=? AND state='executing'").bind(row.id)
