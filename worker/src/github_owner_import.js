@@ -3,6 +3,7 @@
 import {verifyOwnerWorkflowJwt} from "./github_owner_oidc.js";
 import {decryptApprovedEnvelope} from "./sealed_like_batch.js";
 import {enqueueOwnerChoices,validateOwnerSelection} from "./owner_batch_api.js";
+import {sha256} from "./action_pipeline.js";
 export async function importOwnerChoicesFromGithub(env,request,{
  verify=verifyOwnerWorkflowJwt,
  decrypt=decryptApprovedEnvelope,
@@ -26,6 +27,23 @@ export async function importOwnerChoicesFromGithub(env,request,{
   const parsed=validateOwnerSelection(choices);
   return parsed?{ok:true,validation_only:true,count:parsed.items.length,publication_performed:false,persisted:false}:
    {ok:false,status:400,error:"invalid_encrypted_owner_choices",publication_performed:false};
+ }
+ if(choices?.ingress_test_only===true){
+  // Production-safe encrypted ingress smoke: persists only a digest, never a
+  // candidate, preference, proposal, operation, or executable Like.
+  const parsed=validateOwnerSelection(choices);
+  if(!parsed)return {ok:false,status:400,error:"invalid_encrypted_owner_choices",publication_performed:false};
+  const digest=await sha256(JSON.stringify(parsed.items));
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS owner_ingress_smoke (batch_id TEXT PRIMARY KEY,selection_hash TEXT NOT NULL,item_count INTEGER NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP)").run();
+  const prior=await env.DB.prepare("SELECT selection_hash FROM owner_ingress_smoke WHERE batch_id=?").bind(parsed.batch_id).first();
+  if(prior&&prior.selection_hash!==digest)
+   return {ok:false,status:409,error:"test_batch_id_reused_with_different_choices",publication_performed:false};
+  if(!prior)await env.DB.prepare("INSERT INTO owner_ingress_smoke(batch_id,selection_hash,item_count) VALUES(?,?,?)").bind(parsed.batch_id,digest,parsed.items.length).run();
+  const verified=await env.DB.prepare("SELECT selection_hash,item_count FROM owner_ingress_smoke WHERE batch_id=?").bind(parsed.batch_id).first();
+  if(verified?.selection_hash!==digest||verified?.item_count!==parsed.items.length)
+   return {ok:false,status:503,error:"test_ingress_readback_failed",publication_performed:false};
+  return {ok:true,ingress_test_only:true,batch_id:parsed.batch_id,count:parsed.items.length,
+   persisted:true,readback_verified:true,publication_performed:false,dispatch:"disabled_for_test"};
  }
  return enqueue(env,choices);
 }
