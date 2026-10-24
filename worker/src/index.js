@@ -171,6 +171,8 @@ export default {
     if(!acquired.meta?.changes)return json({ok:true,status:"already_triggered_this_slot",publication_performed:false});
     try{
      const outcome=await executeOneApprovedDecision(env);
+     // Old terminal article bodies are compacted; IDs and execution audits remain.
+     try{await pruneTerminalArticleText(env);}catch{}
      await env.DB.prepare("UPDATE jobs SET status=? WHERE id=?").bind(String(outcome.status).slice(0,80),jobId).run();
      return json({ok:outcome.ok,status:outcome.status,publication_performed:outcome.publication_performed},outcome.ok?200:503);
     }catch{
