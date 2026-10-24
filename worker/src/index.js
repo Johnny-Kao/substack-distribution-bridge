@@ -5,6 +5,8 @@ import { runSubjectDiscovery } from './subject_discovery.js';
 import {globalContentStep} from './global_content.js';
 import {screenGlobalCandidates} from './global_screening.js';
 import {deepReviewCandidates} from './deep_screening.js';
+import {readOneCandidateThread} from './comment_context.js';
+import {draftOneComment} from './comment_drafting.js';
 import {executeOneApprovedDecision} from './approved_dispatch.js';
 import {pruneTerminalArticleText,expireStaleCandidates} from './retention.js';
 import {readOneGlobalArticle} from './global_article.js';
@@ -161,6 +163,8 @@ export default {
    if(url.pathname==="/v1/global/read")return readOneGlobalArticle(req,env);
    if(url.pathname==="/v1/global/screen"&&req.method==="POST")return json(await screenGlobalCandidates(env));
    if(url.pathname==="/v1/global/deep-review"&&req.method==="POST")return json(await deepReviewCandidates(env));
+   if(url.pathname==="/v1/global/read-discussion"&&req.method==="POST")return json(await readOneCandidateThread(env));
+   if(url.pathname==="/v1/global/comment-draft"&&req.method==="POST")return json(await draftOneComment(env));
    if(url.pathname==="/v1/global/dispatch-approved"&&req.method==="POST"){
     // BRIDGE_KEY is only a timer signal. Request cannot choose or approve an action.
     // Owner-approved proposal hash, origin, write policy, and DB execution lock
