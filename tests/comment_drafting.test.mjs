@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {webcrypto} from "node:crypto";
 import {validateDraft,draftOneComment} from "../worker/src/comment_drafting.js";
 if(!globalThis.crypto)globalThis.crypto=webcrypto;
-const body="Your argument treats mandate issuance as the decisive control. Would independent verification of the execution trail reveal overlapping delegated authority before settlement, especially when two intermediaries act on different copies of the same instruction?";
+const body="Your argument treats mandate issuance as the decisive control. Would independent verification of the execution trail reveal overlapping delegated authority before settlement, especially when two intermediaries act on different copies of the same instruction? This matters especially when audit responsibilities cross organizational boundaries and no single actor observes the complete chain.";
 test("draft schema rejects generic, promotional or overlong comments",()=>{
  assert.ok(validateDraft({response:{body,rationale:"Specific challenge."}}));
  assert.equal(validateDraft({response:{body:"Looks good",rationale:"Why"}}),null);
