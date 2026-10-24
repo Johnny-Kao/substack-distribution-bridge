@@ -105,3 +105,30 @@ test("unknown or executing like remains fail-closed, skip creates no proposals",
  assert.equal(result.ok,true);
  assert.equal(DB.batches[0].filter(s=>s.sql.includes("INTO proposals")).length,0);
 });
+
+test("encrypted ingress test persists digest only and never queues Like or feedback",async()=>{
+ const selection={...make(),ingress_test_only:true};
+ const audit={};
+ let queueCalls=0;
+ const DB={prepare(sql){return {
+  bind(...args){this.args=args;return this;},
+  async first(){if(sql.includes("FROM owner_ingress_smoke"))return audit[this.args[0]]||null;return null;},
+  async run(){if(sql.includes("INSERT INTO owner_ingress_smoke"))audit[this.args[0]]={selection_hash:this.args[1],item_count:this.args[2]};return {meta:{changes:1}};}
+ };}};
+ const importOnce=()=>importOwnerChoicesFromGithub({DB},request(),{
+  verify:async()=>({ok:true}),
+  decrypt:async()=>new TextEncoder().encode(JSON.stringify(selection)),
+  enqueue:async()=>{queueCalls++;throw Error("must not execute");}
+ });
+ const first=await importOnce();
+ assert.equal(first.ok,true);
+ assert.equal(first.persisted,true);
+ assert.equal(first.readback_verified,true);
+ assert.equal(first.dispatch,"disabled_for_test");
+ assert.equal(first.publication_performed,false);
+ assert.equal(Object.keys(audit).length,1);
+ const again=await importOnce();
+ assert.equal(again.ok,true);
+ assert.equal(Object.keys(audit).length,1);
+ assert.equal(queueCalls,0);
+});
