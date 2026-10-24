@@ -65,6 +65,15 @@ test("network ambiguity halts further interactions",async()=>{
  assert.equal(outcome.status,"ambiguous_write_halted");assert.equal(outcome.publication_performed,null);
  assert.ok(DB.calls.some(x=>x.sql.includes("SET halted=1")));
 });
+test("known Substack 403 rejection cannot halt unrelated owner-approved Likes",async()=>{
+ const DB=fixture();DB.proposal.body_hash=await sha256("like\u0000"+DB.proposal.target+"\u0000");
+ const result=await executeOneApprovedDecision({DB},{perform:async()=>{throw Error("substack_action_rejected_403_subscription_required");},budget:async(_db,_kind,fn)=>fn()});
+ assert.equal(result.ok,true);assert.equal(result.status,"declined_permission");
+ assert.equal(result.publication_performed,false);
+ assert.ok(DB.calls.some(x=>x.sql.includes("UPDATE operations SET status='rejected'")));
+ assert.ok(DB.calls.some(x=>x.sql.includes("UPDATE proposals SET state='rejected'")));
+ assert.ok(!DB.calls.some(x=>x.sql.includes("SET halted=1")));
+});
 test("quota admission denial safely defers without making a write",async()=>{
  const DB=fixture();DB.proposal.body_hash=await sha256("like\u0000"+DB.proposal.target+"\u0000");let calls=0;
  const outcome=await executeOneApprovedDecision({DB},{perform:async()=>{calls++},budget:async()=>{throw Error("browser_free_budget_or_pacing");}});
