@@ -25,17 +25,23 @@ export function validateApprovedLikeBatch(batch){
  }
  return true;
 }
-export async function importApprovedLikeBatch(env,envelope){
+export async function verifyPinnedLikeBatch(envelope,privatePem){
  let plaintext;
- try{plaintext=await decryptApprovedEnvelope(envelope,env.APPROVED_COMMENT_PRIVATE_PEM);}
- catch{return {ok:false,error:"sealed_batch_decryption_failed",publication_performed:false};}
+ try{plaintext=await decryptApprovedEnvelope(envelope,privatePem);}
+ catch{return {ok:false,error:"sealed_batch_decryption_failed"};}
  const bytes=new Uint8Array(plaintext);
  const digest=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",bytes))).map(v=>v.toString(16).padStart(2,"0")).join("");
- if(digest!==ALLOWED_BATCH_HASH)return {ok:false,error:"owner_approval_digest_mismatch",publication_performed:false};
+ if(digest!==ALLOWED_BATCH_HASH)return {ok:false,error:"owner_approval_digest_mismatch"};
  let batch;
  try{batch=JSON.parse(new TextDecoder().decode(bytes));}
- catch{return {ok:false,error:"invalid_approved_json",publication_performed:false};}
- if(!validateApprovedLikeBatch(batch))return {ok:false,error:"invalid_exact_approval",publication_performed:false};
+ catch{return {ok:false,error:"invalid_approved_json"};}
+ if(!validateApprovedLikeBatch(batch))return {ok:false,error:"invalid_exact_approval"};
+ return {ok:true,batch};
+}
+export async function importApprovedLikeBatch(env,envelope){
+ const receipt=await verifyPinnedLikeBatch(envelope,env.APPROVED_COMMENT_PRIVATE_PEM);
+ if(!receipt.ok)return {ok:false,error:receipt.error,publication_performed:false};
+ const batch=receipt.batch;
  const db=env.DB;
  const state=await db.prepare("SELECT halted FROM write_policy WHERE id=1").first();
  if(state?.halted)return {ok:false,error:"write_policy_halted",publication_performed:false};
