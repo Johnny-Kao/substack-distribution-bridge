@@ -21,6 +21,7 @@ jobs:
       BRIDGE_URL: ${{ vars.BRIDGE_URL }}
       BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
     steps:
+      - uses: actions/checkout@v5
       - name: Execute up to 20 already-approved Likes with readback and 17s pacing
         shell: bash
         run: |
