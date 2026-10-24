@@ -1,5 +1,7 @@
 // Stage 2: independent, full-article reasoning for shortlisted candidates.
 // This is read/review only: never Like, post, approve, or change authorization.
+// A qualified Like may create a PRIVATE pending proposal; no public action.
+import {autoStageDeepLike} from "./action_pipeline.js";
 export const DEEP_MODEL="@cf/openai/gpt-oss-120b";
 export const MAX_DEEP_CHARS=42000;
 const decisions=new Set(["comment_review","like_review","skip"]);
@@ -44,7 +46,7 @@ export async function deepReviewCandidates(env){
  const total=await env.DB.prepare("SELECT COUNT(*) AS n FROM ai_usage WHERE created_at>=datetime('now','-1 day')").first();
  const deep=await env.DB.prepare("SELECT COUNT(*) AS n FROM ai_usage WHERE kind IN ('global_deep_review','global_deep_attempt') AND created_at>=datetime('now','-1 day')").first();
  if(Number(total?.n||0)>=8||Number(deep?.n||0)>=2)return {ok:true,reviewed:0,reason:"ai_daily_cap",publication_performed:false};
- const candidate=await env.DB.prepare("SELECT t.id,c.title,g.full_text,t.score,t.semantic_verdict,t.semantic_rationale FROM engagement_targets t JOIN candidates c ON t.id=c.id JOIN global_posts g ON g.id=CAST(substr(t.id,length(c.pub)+2) AS INTEGER) AND g.subdomain=c.pub WHERE t.review_state='semantically_reviewed' AND t.semantic_verdict IN ('comment_review','like_review') AND t.score>=60 AND length(g.full_text)>=600 AND json_extract(t.evidence_signals,'$.deep_review') IS NULL ORDER BY t.score DESC,g.published DESC LIMIT 1").first();
+ const candidate=await env.DB.prepare("SELECT t.id,c.title,c.url,g.full_text,t.score,t.semantic_verdict,t.semantic_rationale FROM engagement_targets t JOIN candidates c ON t.id=c.id JOIN global_posts g ON g.id=CAST(substr(t.id,length(c.pub)+2) AS INTEGER) AND g.subdomain=c.pub WHERE t.review_state='semantically_reviewed' AND t.semantic_verdict IN ('comment_review','like_review') AND t.score>=60 AND length(g.full_text)>=600 AND json_extract(t.evidence_signals,'$.deep_review') IS NULL ORDER BY t.score DESC,g.published DESC LIMIT 1").first();
  if(!candidate)return {ok:true,reviewed:0,reason:"no_qualified_candidate",publication_performed:false};
  const article=String(candidate.full_text||"").slice(0,MAX_DEEP_CHARS);
  const anchors=evidenceAnchors(article);
@@ -90,9 +92,18 @@ export async function deepReviewCandidates(env){
   evidence_quote:verdict.evidence_quote,risk:verdict.risk,article_characters:article.length,
   discussion_context:"not_fetched",publication_performed:false
  };
+ // Save AI evidence first; the proposal is a distinct, private side effect.
  await env.DB.batch([
   env.DB.prepare("UPDATE engagement_targets SET evidence_signals=json_set(evidence_signals,'$.deep_review',json(?)),updated_at=CURRENT_TIMESTAMP WHERE id=? AND json_extract(evidence_signals,'$.deep_review') IS NULL").bind(JSON.stringify(evidence),candidate.id),
   env.DB.prepare("UPDATE ai_usage SET kind='global_deep_review' WHERE id=?").bind(attemptId)
  ]);
- return {ok:true,reviewed:1,stage:"deep_review",publication_performed:false};
+ let handoff="needs_discussion_and_exact_comment";
+ try{
+  const proposal=await autoStageDeepLike(env,candidate,verdict);
+  handoff=proposal.state;
+ }catch{
+  handoff="staging_failed"; // Review remains persisted and is discoverable.
+ }
+ await env.DB.prepare("UPDATE engagement_targets SET evidence_signals=json_set(evidence_signals,'$.workflow_state',?),updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(handoff,candidate.id).run();
+ return {ok:true,reviewed:1,stage:"deep_review",decision_handoff:handoff,publication_performed:false};
 }
