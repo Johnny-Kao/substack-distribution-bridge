@@ -9,6 +9,7 @@ import {readOneCandidateThread} from './comment_context.js';
 import {draftOneComment} from './comment_drafting.js';
 import {executeOneApprovedDecision} from './approved_dispatch.js';
 import {reconcileOneOrphanLike} from './orphan_like_reconcile.js';
+import {recoverOnePinnedUnknownLike} from './recover_approved_like.js';
 import {parseApprovedBatchStep,approvedBatchJobId} from './dispatch_window.js';
 import {importApprovedLikeBatch} from './sealed_like_batch.js';
 import {pruneTerminalArticleText,expireStaleCandidates} from './retention.js';
@@ -26,6 +27,11 @@ export default {
   if(url.pathname==="/health")return json({ok:true,mode:"github_cloudflare_only",public_write_enabled:false});
   if(url.pathname.startsWith("/v1/write/"))return writeHandler(req,env,url);
   if(!allow(req,env))return json({error:"unauthorized"},401);
+  if(url.pathname==="/v1/global/recover-pinned-approved-like"&&req.method==="POST"){
+   const envelope=await req.json().catch(()=>null);
+   const result=await recoverOnePinnedUnknownLike(env,envelope);
+   return json(result,result.ok?200:409);
+  }
   if(url.pathname==="/v1/global/import-approved-like-batch"&&req.method==="POST"){
    const envelope=await req.json().catch(()=>null);
    const result=await importApprovedLikeBatch(env,envelope);
