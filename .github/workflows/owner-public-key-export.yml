@@ -1,0 +1,31 @@
+name: Verify and publish RSA public key material for private owner approvals
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/owner-public-key-export.yml"
+permissions:
+  contents: read
+jobs:
+  public-key:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    env:
+      BRIDGE_URL: ${{ vars.BRIDGE_URL }}
+    steps:
+      - name: Fetch PUBLIC RSA encryption key (never access private key)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,urllib.request
+          url=os.environ['BRIDGE_URL'].rstrip('/')+'/v1/owner-approval-public-key'
+          with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0'}),timeout=25) as r:d=json.load(r)
+          assert d.get('ok') is True and d.get('algorithm')=='RSA-OAEP-256+AES-256-GCM'
+          pem=d.get('pem','')
+          assert pem.startswith('-----BEGIN PUBLIC KEY-----') and pem.endswith('-----END PUBLIC KEY-----\n')
+          print('BEGIN_VERIFIED_PUBLIC_KEY')
+          print(pem,end='')
+          print('END_VERIFIED_PUBLIC_KEY')
+          print('Only the public encryption key; no credentials, target data or private key')
+          PY
