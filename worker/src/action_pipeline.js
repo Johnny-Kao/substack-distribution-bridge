@@ -15,7 +15,7 @@ export function actionStage({deepDecision,alreadyHandled=false,proposalState=nul
  if(proposalState==="proposed")return "awaiting_approval";
  if(deepDecision==="skip")return "rejected";
  if(deepDecision==="like_review")return "ready_to_propose_like";
- if(deepDecision==="comment_review")return discussionReviewed?"ready_for_exact_comment":"needs_discussion_and_exact_comment";
+ if(deepDecision==="comment_review")return discussionReviewed?"comment_draft_ready":"needs_discussion_and_exact_comment";
  return "awaiting_deep_review";
 }
 export async function stageApprovedDecisionCandidate(env,{id,kind,body="",discussionReviewed=false}){
@@ -27,7 +27,7 @@ export async function stageApprovedDecisionCandidate(env,{id,kind,body="",discus
  if(!target)return {ok:false,error:"reviewed_candidate_not_found",status:404};
  let signals;try{signals=JSON.parse(target.evidence_signals)}catch{return {ok:false,error:"invalid_private_evidence",status:409};}
  if(!signals?.deep_review||signals?.deep_review?.decision!==(kind==="like"?"like_review":"comment_review")||target.score<60)return {ok:false,error:"no_qualifying_deep_decision",status:409};
- if(kind==="comment"&&signals?.deep_review?.discussion_context!=="not_fetched")return {ok:false,error:"unexpected_discussion_state",status:409};
+ if(kind==="comment"&&signals?.discussion?.status!=="sampled")return {ok:false,error:"verified_discussion_context_required",status:409};
  if(target.existing_actions)return {ok:false,error:"previous_interaction_or_uncertain",status:409};
  if(!Number.isSafeInteger(target.post_id)||target.post_id<=0)return {ok:false,error:"invalid_post_id",status:409};
  const hash=await sha256(kind+"\u0000"+target.url+"\u0000"+body);
@@ -58,8 +58,8 @@ export async function listDecisionOutbox(env){
  const rows=await env.DB.prepare("SELECT t.id,c.title,c.url,g.id AS post_id,t.score,t.evidence_signals,t.semantic_verdict,t.comment_angle, (SELECT p.state FROM proposals p WHERE p.target=c.url AND p.origin='decision_pipeline_v1' ORDER BY p.created_at DESC LIMIT 1) AS proposal_state, EXISTS(SELECT 1 FROM operations o WHERE o.target=c.url AND o.kind IN ('comment','like') AND o.status IN ('unknown','succeeded','executing')) AS already_handled FROM engagement_targets t JOIN candidates c ON c.id=t.id JOIN global_posts g ON g.url=c.url WHERE t.review_state='semantically_reviewed' AND json_extract(t.evidence_signals,'$.deep_review.decision') IN ('like_review','comment_review','skip') ORDER BY t.score DESC LIMIT 30").all();
  const out=(rows.results||[]).map(row=>{
   let d={};try{d=JSON.parse(row.evidence_signals)?.deep_review||{}}catch{}
-  const state=actionStage({deepDecision:d.decision,alreadyHandled:!!row.already_handled,proposalState:row.proposal_state});
-  return {id:row.id,title:row.title,url:row.url,post_id:row.post_id,score:row.score,decision:d.decision||null,rationale:d.rationale||null,evidence_quote:d.evidence_quote||null,angle:d.angle||null,discussion_context:d.discussion_context||"unknown",state};
+  const signals=JSON.parse(row.evidence_signals);const state=actionStage({deepDecision:d.decision,alreadyHandled:!!row.already_handled,proposalState:row.proposal_state,discussionReviewed:signals?.discussion?.status==="sampled"&&signals?.comment_draft?.status==="ready_for_owner_approval"});
+  return {id:row.id,title:row.title,url:row.url,post_id:row.post_id,score:row.score,decision:d.decision||null,rationale:d.rationale||null,evidence_quote:d.evidence_quote||null,angle:d.angle||null,discussion_context:signals?.discussion?.status||"not_fetched",discussion_sample_size:signals?.discussion?.sampled||0,draft:signals?.comment_draft?.body||null,draft_rationale:signals?.comment_draft?.rationale||null,state};
  });
  const counts=out.reduce((o,row)=>(o[row.state]=(o[row.state]||0)+1,o),{});
  return {ok:true,items:out,counts,publication_performed:false};
