@@ -191,7 +191,7 @@ export default {
     // BRIDGE_KEY is only a timer signal. Request cannot choose or approve an action.
     // Owner-approved proposal hash, origin, write policy, and DB execution lock
     // remain mandatory inside executeOneApprovedDecision.
-    const slot=Math.floor(Date.now()/10800000); // one attempt per 3h UTC slot
+    const slot=Math.floor(Date.now()/3600000); // at most one approved dispatch per UTC hour
     const jobId="approved_dispatch_"+slot;
     const acquired=await env.DB.prepare("INSERT OR IGNORE INTO jobs(id,kind,status) VALUES(?,'approved_dispatch','running')").bind(jobId).run();
     if(!acquired.meta?.changes)return json({ok:true,status:"already_triggered_this_slot",publication_performed:false});
