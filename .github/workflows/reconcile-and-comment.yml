@@ -1,4 +1,4 @@
-name: Diagnose and finish exact approved comment
+name: Submit exact approved comment using verified minimal Substack schema
 on:
   push:
     branches: [master]
@@ -56,7 +56,7 @@ jobs:
               sys.exit(1)
           open("/tmp/approved-comment-recovery-status","w").write(data["status"])
           PY
-      - name: Submit one exact approved comment only after independent proof of absence
+      - name: Send exactly one minimal-schema Substack comment after independent readback
         shell: bash
         run: |
           set -euo pipefail
