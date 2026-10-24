@@ -1,30 +1,31 @@
 # Substack Distribution Bridge
 
-Privacy-first Substack discovery pipeline using only GitHub Actions, Cloudflare Worker, Workers AI and D1. No local computer or external paid service is required for the deployed control plane.
+Cloud-only Substack discovery and supervised engagement using GitHub Actions, Cloudflare Workers, Browser Rendering, Workers AI and private D1. No personal Mac/M5 is required to run the deployed system.
 
-## Current capabilities
-- The primary global content workflow runs every three hours, searches one page of cross-publication Substack Posts, and persists canonical post IDs, author publication identifiers, excerpts and engagement metadata in private D1. Search cycles use at most five pages (100 results) per subject, with deduplication and low-yield early stopping.
-- Each global workflow also opens one actual post by ID through Browser Run, reads its available article body, then performs one bounded Workers AI semantic review. A search preview alone is not sufficient for semantic acceptance. No public interactions are executed.
-- Supplemental public RSS discovery runs every three hours; authenticated publication discovery runs every 12 hours. All Browser Run uses share an atomic D1 gate (minimum 15-second spacing, at most 38 actions and 390 seconds accounted usage in 24 hours), without paid overflow.
-- Upstream access failures are reported as failures, **not** successful zero-result scans.
-- All private data is stored in Cloudflare and is not printed in Actions output.
-- Cloudflare bridge credentials are held in Secrets.
-- Private editorial AI drafts, proposal hashes and manual batch approval remain in Cloudflare D1. These operations **do not publish** to Substack.
-- Discovery candidates now preserve excerpts, subject-fit signals, priority scores, and possible Like/comment *review* actions in a private engagement queue. Semantic review generates rationale and discussion angles, not publication approval.
-- M5 research established cross-publication post search using `/api/v1/post/search`, separate from `/api/v1/publication/search`. Cloudflare stores the global search cursor and runs one page per invocation.
-- The owner-only **read-only** subject-probe endpoint remains available for diagnostics. Cloudflare subject-search returned 17 publications in a live test; the new source pool subsequently returned a valid RSS with five posts.
-- Direct authenticated Substack requests from Workers returned HTTP 429, and GitHub-hosted direct RSS returned HTTP 403. The read-only Browser Run RSS path returned real XML over HTTPS and successfully populated D1 in a local end-to-end test. Authenticated social actions remain unverified.
-- **Public Likes, Comments and Notes are disabled**. Finding publications is not equivalent to validating author relevance, commentability, previous reactions or publish permissions. Do not claim unattended publication or a complete engagement workflow.
-- No M5 LaunchAgent, runner credential or external hosting is part of the production architecture.
+## Active production architecture
 
-## Acceptance
-- 2026-10-24: GitHub Actions run 39977847879 verified 20 real global search hits, 18 new posts, one full article readback and one Workers AI semantic review. Cloud D1 had 136 distinct posts after that run. This is a verified search-to-review pipeline, **not** verified public engagement.
-- Global Notes search, threaded discussion understanding, external prior-interaction readback, and cloud public write transport are not accepted. Do not call the overall engagement system complete.
-- Discovery cannot be marked PASS if it fetched zero articles while private source configuration is present.
-- HTTP 403/429 is recorded in private D1 and surfaces as a failed Discovery run; no automatic cooldown is applied during integration testing. Each run makes only bounded requests; data is retained.
-- Public posting requires separately demonstrated supported write access, exact-target approvals, idempotency and readback before any future activation.
+- **One scheduled discovery pipeline:** `.github/workflows/global-discovery.yml`, every three hours. It searches Substack posts **across publications**, maintains private D1 cursors, deduplicates post IDs, selects candidate posts, retrieves up to two full articles and runs bounded semantic assessment.
+- Cloudflare D1 stores targets, drafts, scores, outcomes, identity checks, and authorization state. GitHub logs must not expose private subjects, targets, session credentials, or unpublished drafts.
+- A separately approved, single exact-comment operation has been published from Cloudflare and independently verified against the author account and post. That **does not authorize unattended commenting or posting on other articles**.
+- The authenticated Like state can be read via the cloud-only Browser Session path. Posting, idempotency, and readback are separate capabilities; do not assume all write operations work from a successful read.
 
-## Agent interoperability
-AI clients can read the public SOP and workflow code using GitHub MCP. Public repository, Issues, and Actions are **not** private communication channels and must not be used to transmit operational contents, even encrypted. Private state query transport must be separately authorized and privacy-reviewed before activation.
+## Retired legacy schedules
 
-See AGENTS.md and SOP.md.
+As of 2026-10-24, the independent RSS/source-feed schedule (`discovery.yml`) and publication-only subject discovery schedule (`subject-discovery.yml`) have been deleted. They were redundant for the user's platform-wide post-search objective and competed for Browser Rendering quota.
+
+Lower-level RSS/feed parsers and older subject-search functions remain in the repository as uninvoked utilities for compatibility and tests; **they are not production scheduled jobs**.
+
+## Review and verification
+
+- Workers AI screening reads full article excerpts only. It uses the JSON-Mode supported `@cf/meta/llama-3.1-8b-instruct` model with strict verdict validation and a privacy-safe error category. Malformed output leaves the article in the pending queue instead of recording a fabricated evaluation.
+- Each scheduled search must distinguish successful discovery, exhausted free-browser capacity, AI deferred by daily cap, and genuine upstream errors. Do not equate a zero-result page with success if the upstream request failed.
+- Actions are read-only until an exact author-approved target and content are provided. Never publish based on automated discovery scores alone; protect against duplicates and ambiguous retries.
+- Cloudflare free-browser budget and a D1 request pacing gate protect against paid overflow.
+
+## Evidence
+
+- 2026-10-24 cloud comment acceptance: [GitHub Actions #40048519286](https://github.com/Johnny-Kao/substack-distribution-bridge/actions/runs/40048519286), published once and exact-account/body verified.
+- Previous global search persisted over 170 post records in private D1, but an AI screening error caused a scheduled job to fail; see Global Discovery workflow for the current acceptance history.
+- Browser access, AI evaluation, private state readback and public interaction are tested **separately**. One green check does not establish complete unattended operation.
+
+Read `AGENTS.md` and `SOP.md` for privacy and execution controls.
