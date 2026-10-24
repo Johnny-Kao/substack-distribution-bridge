@@ -4,7 +4,7 @@ Private targeting weights, source lists, draft histories, engagement evidence, r
 
 ## Discovery
 - Read approved source list / keywords from private policy through the authorized gateway.
-- Separate GitHub Actions workflows (subject search every three hours; article scan hourly) call private Cloudflare Worker endpoints. Subject search uses the stored Substack account session and a one-page D1 cursor; newly discovered publications are deduplicated and admitted to the article scan pool. RSS reading is public-only. Each action performs zero-token deterministic pre-QC.
+- One scheduled Global Discovery workflow runs every three hours and searches Substack posts across publications, using a private D1 term/page cursor. Up to two full-article readbacks and bounded AI screening follow. RSS/source and publication-only schedules were retired on 2026-10-24; their utilities remain unscheduled for compatibility.
 - GitHub timers are offset; Worker D1 provides an atomic 15-second Browser Run free-plan pacing gate. Maximum 38 actions/24h and 390 seconds accounted time/24h, with no paid fallback.
 - During initial integration testing, HTTP 403/429 is reported immediately as a failure rather than skipping subsequent scheduled or manual diagnostics. Do not retry repeatedly within one run. Data stays private; GitHub logs show only aggregate counts.
 
@@ -35,9 +35,15 @@ Private targeting weights, source lists, draft histories, engagement evidence, r
 - Worker Browser Run public RSS returned HTTP 200 and XML; local orchestration fetched 10 articles, prequalified 1 and ingested 1 into D1 on 2026-10-23. GitHub-hosted Actions acceptance must be checked separately.
 - Cloud authenticated session probe: HTTP 200 using the verified M5 header profile.
 - Cloud private write staging: separate owner-only credential, no GitHub publication permissions; Dry-run and denial checks pass.
-- Direct Worker fetch and GitHub-hosted requests to Substack returned HTTP 429 and HTTP 403 respectively. Browser Run restored public RSS reads; no verified production cloud-only Substack **write** transport exists yet.
-- All live public writes remain disabled, including auto QC Likes, until a supported Substack write interface and end-to-end verification are demonstrated using only GitHub and Cloudflare.
+- Earlier direct Workers/GitHub requests to Substack were blocked by HTTP 429/403; Cloudflare Browser Sessions are the accepted authentication/readback transport. A specifically approved single Comment was published and independently verified in GitHub run #40048519286 on 2026-10-24. This is not general unattended write authorization.
+- Public writes require explicit, exact target-and-body approval. Discovery never authorizes them; unsolicited auto-Likes, Comments and Notes remain disabled. Unknown write outcomes halt further action until independent readback.
 - Acceptance must independently verify topic-wide discovery beyond fixed sources, semantic target review, prior-interaction deduplication, approved posting and post-write readback. RSS acquisition alone is not acceptance.
 - Discovery must report an upstream block or zero fetched posts as degraded, never as success. No six-hour cooldown until the transport is verified; reintroduce a documented backoff policy only after successful end-to-end acceptance.
 - Strict error mode: unexpected write-control failures halt operations; owner must explicitly resume.
 - Approved engagement limits are enforced independently of the discovery schedule. One batch approval pins each target and exact body hash.
+
+## Global Discovery semantic-screening regression (2026-10-24)
+- An overnight scheduled Global Discovery run found 20 posts (18 new) and completed two full reads, then failed at Workers AI verdict validation. The post discovery portion was not at fault.
+- The originally used Llama 3.1 8B non-fast model was deprecated on 2026-05-30; switching to it caused a live AI inference error. The fast variant's JSON mode behavior was inconsistent.
+- The active JSON-schema capable `@cf/meta/llama-3.3-70b-instruct-fp8-fast` model, stricter response validation, and privacy-safe reason codes were deployed and accepted in live run #40055859970: one real queued article screened, HTTP 200.
+- A successful single AI smoke review does not prove that future browser-budget constrained scheduled batches always execute. Continue to report upstream failures and quota deferrals explicitly; never replace a failed search with a zero-result success.
