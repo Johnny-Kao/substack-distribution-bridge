@@ -25,7 +25,7 @@ test("AI screening uses JSON-mode supported model and writes only accepted verdi
   const ai={async run(model,input){selected=model;payload=input;return {response:JSON.stringify(valid)};}};
   const result=await screenGlobalCandidates({DB:db,AI:ai});
   assert.equal(result.ok,true);assert.equal(result.reviewed,1);assert.equal(result.publication_performed,false);
-  assert.equal(selected,"@cf/meta/llama-3.1-8b-instruct");
+  assert.equal(selected,"@cf/meta/llama-3.3-70b-instruct-fp8-fast");
   assert.equal(payload.response_format.type,"json_schema");
   assert.equal(db.updated.length,1);
 });
