@@ -55,6 +55,11 @@ export async function enqueueOwnerChoices(env,input){
   const mapping=await db.prepare("SELECT post_id FROM approved_external_posts WHERE url=?").bind(entry.url).first();
   if(mapping&&mapping.post_id!==entry.post_id)
    return {ok:false,error:"post_id_url_identity_conflict",status:409,publication_performed:false};
+  // A numeric Substack post cannot be registered against two distinct canonical URLs.
+  // Fail closed before any D1.batch writes. Existing legacy mappings are not rewritten.
+  const reverse=await db.prepare("SELECT url FROM approved_external_posts WHERE post_id=? LIMIT 1").bind(entry.post_id).first();
+  if(reverse&&reverse.url!==entry.url)
+   return {ok:false,error:"post_id_url_identity_conflict",status:409,publication_performed:false};
   const existing=await db.prepare("SELECT id,state,origin,body_hash FROM proposals WHERE kind='like' AND target=? LIMIT 1").bind(entry.url).first();
   const priorWrite=await db.prepare("SELECT status FROM operations WHERE kind='like' AND target=? ORDER BY created_at DESC LIMIT 1").bind(entry.url).first();
   if(entry.choice==="like"&&
