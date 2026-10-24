@@ -7,7 +7,7 @@ import {listDecisionOutbox,stageApprovedDecisionCandidate} from "./action_pipeli
 import {recordFeedback,feedbackEventId,feedbackStats} from "./feedback_learning.js";
 const reply=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 const kinds=new Set(["like","comment","note"]);
-const limits={like:10,comment:3,note:2};
+const limits={like:20,comment:3,note:2};
 const encoder=new TextEncoder();
 const isoDay=()=>new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Tokyo"});
 const digest=async text=>Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",encoder.encode(text)))).map(x=>x.toString(16).padStart(2,"0")).join("");
