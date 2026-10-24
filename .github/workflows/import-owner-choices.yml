@@ -25,7 +25,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json,os,urllib.parse,urllib.request
+          import json,os,urllib.parse,urllib.request,urllib.error
           base=os.environ['BRIDGE_URL'].rstrip('/')
           aud=base+'/v1/global/import-owner-choices'
           origin=os.environ['ACTIONS_ID_TOKEN_REQUEST_URL']
@@ -38,7 +38,28 @@ jobs:
           probe=urllib.request.Request(base+'/v1/global/owner-identity-probe',method='POST',data=b'{}',
               headers={'Authorization':'Bearer '+os.environ['BRIDGE_KEY'],
                        'X-GitHub-OIDC':proof,'Content-Type':'application/json','User-Agent':'Mozilla/5.0'})
-          with urllib.request.urlopen(probe,timeout=35) as r: result=json.load(r)
+          try:
+              with urllib.request.urlopen(probe,timeout=35) as r: result=json.load(r)
+          except urllib.error.HTTPError as e:
+              try:detail=json.load(e)
+              except Exception:detail={}
+              print('OIDC verification category: '+str(detail.get('reason','unknown'))[:55]+
+                    '; HTTP '+str(e.code))
+              import base64
+              payload=proof.split('.')[1]
+              claims=json.loads(base64.urlsafe_b64decode(payload+'='*((-len(payload))%4)))
+              expected={
+                 'issuer':claims.get('iss')=='https://token.actions.githubusercontent.com',
+                 'audience':claims.get('aud')==aud,
+                 'repo':str(claims.get('repository_id'))=='1430511205',
+                 'actor':str(claims.get('actor_id'))=='19386515',
+                 'workflow':claims.get('workflow_ref')=='Johnny-Kao/substack-distribution-bridge/.github/workflows/import-owner-choices.yml@refs/heads/master',
+                 'event':claims.get('event_name')=='push',
+                 'ref':claims.get('ref')=='refs/heads/master',
+                 'sub':claims.get('sub')=='repo:Johnny-Kao/substack-distribution-bridge:ref:refs/heads/master'
+              }
+              print('OIDC public claim checks: '+', '.join(k+'='+str(v) for k,v in expected.items()))
+              raise SystemExit('OIDC owner authentication failed')
           if result.get('ok') is not True:raise SystemExit('GitHub owner identity proof not verified')
           print('Owner OIDC authorization verified; no article targets or publication performed')
           PY
