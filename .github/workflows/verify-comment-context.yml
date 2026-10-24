@@ -1,0 +1,45 @@
+name: Verify read-only comment context and feedback capabilities
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/verify-comment-context.yml"
+permissions:
+  contents: read
+concurrency:
+  group: substack-private-comment-context-smoke
+  cancel-in-progress: false
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    env:
+      BRIDGE_URL: ${{ vars.BRIDGE_URL }}
+      BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
+    steps:
+      - name: Test authenticated private discussion sampling and drafting endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,json,urllib.request,urllib.error,sys
+          base=os.environ["BRIDGE_URL"].rstrip("/")
+          key=os.environ["BRIDGE_KEY"]
+          if not base.startswith("https://") or not key:sys.exit("Bridge configuration missing")
+          for route,field in [("read-discussion","read"),("comment-draft","drafted")]:
+              req=urllib.request.Request(base+"/v1/global/"+route,method="POST",data=b"{}",headers={"Authorization":"Bearer "+key,"Content-Type":"application/json","User-Agent":"Mozilla/5.0"})
+              try:
+                  with urllib.request.urlopen(req,timeout=110) as resp: status=resp.status;data=json.load(resp)
+              except urllib.error.HTTPError as e:
+                  status=e.code
+                  try:data=json.load(e)
+                  except Exception:data={}
+              reason=data.get("reason")
+              permitted={"no_pending_comment_thread","no_ready_comment_context","ai_daily_cap","browser_quota"}
+              state="PASS" if data.get("ok") is True and int(data.get(field,0))>0 else "DEFERRED" if data.get("ok") is True and reason in permitted else "FAIL"
+              if route=="read-discussion" and reason=="browser_quota" and status!=200:state="DEFERRED"
+              print(route+": "+state+"; count="+str(data.get(field,0))+"; category="+str(reason)[:48]+"; HTTP "+str(status))
+              print("No private author, target, body or draft is printed; no public write")
+              if state=="FAIL":sys.exit(1)
+          PY
