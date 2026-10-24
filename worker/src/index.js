@@ -161,6 +161,24 @@ export default {
    if(url.pathname==="/v1/global/read")return readOneGlobalArticle(req,env);
    if(url.pathname==="/v1/global/screen"&&req.method==="POST")return json(await screenGlobalCandidates(env));
    if(url.pathname==="/v1/global/deep-review"&&req.method==="POST")return json(await deepReviewCandidates(env));
+   if(url.pathname==="/v1/global/dispatch-approved"&&req.method==="POST"){
+    // BRIDGE_KEY is only a timer signal. Request cannot choose or approve an action.
+    // Owner-approved proposal hash, origin, write policy, and DB execution lock
+    // remain mandatory inside executeOneApprovedDecision.
+    const slot=Math.floor(Date.now()/10800000); // one attempt per 3h UTC slot
+    const jobId="approved_dispatch_"+slot;
+    const acquired=await env.DB.prepare("INSERT OR IGNORE INTO jobs(id,kind,status) VALUES(?,'approved_dispatch','running')").bind(jobId).run();
+    if(!acquired.meta?.changes)return json({ok:true,status:"already_triggered_this_slot",publication_performed:false});
+    try{
+     const outcome=await executeOneApprovedDecision(env);
+     await env.DB.prepare("UPDATE jobs SET status=? WHERE id=?").bind(String(outcome.status).slice(0,80),jobId).run();
+     return json({ok:outcome.ok,status:outcome.status,publication_performed:outcome.publication_performed},outcome.ok?200:503);
+    }catch{
+     await env.DB.prepare("UPDATE jobs SET status='dispatch_error' WHERE id=?").bind(jobId).run();
+     return json({ok:false,status:"dispatch_error",publication_performed:null},503);
+    }
+   }
+
    if(url.pathname==="/v1/global/verify-comment-readback"&&req.method==="POST"){
     const row=await env.DB.prepare("SELECT url,id FROM global_posts WHERE full_read_at IS NOT NULL ORDER BY full_read_at DESC LIMIT 1").first();
     if(!row)return json({error:"no_private_article_for_comment_probe",publication_performed:false},503);
@@ -249,6 +267,7 @@ export default {
     engagement_target_count:targets?.n||0,
      global_posts:global?.posts||0,global_publications:global?.publications||0,global_full_reads:global?.full_reads||0,
      global_semantic_reviewed:screening?.reviewed||0,global_semantic_skipped:screening?.skipped||0,global_semantic_potentially_relevant:screening?.potentially_relevant||0,
+     decision_pipeline:"scan_to_deep_review_to_owner_approval_to_verified_execution",
     discovered_publication_count:pubs?.n||0,
     subject_latest:topic?{status:topic.status,created_at:topic.created_at,returned:topic.returned,valid:topic.valid_count}:null,
     browser_requests_24h:budget?.n||0,browser_ms_24h:budget?.ms||0,
@@ -258,14 +277,5 @@ export default {
   // Write endpoints are deliberately absent until explicit authorization and
   // idempotent readback verification have been validated independently.
   return json({error:"not_found"},404);
- },
- async scheduled(_event,env,ctx){
-  // Cron has no BRIDGE_KEY or OWNER_WRITE_KEY: DB approval is the capability.
-  // A proposal must already have been approved with its exact body hash.
-  ctx.waitUntil((async()=>{
-   try{await executeOneApprovedDecision(env);}catch{}
-   // Retention never changes proposal/operation state or reissues a write.
-   try{await pruneTerminalArticleText(env);}catch{}
-  })());
  }
 };
