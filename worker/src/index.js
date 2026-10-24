@@ -6,7 +6,7 @@ import {globalContentStep} from './global_content.js';
 import {screenGlobalCandidates} from './global_screening.js';
 import {deepReviewCandidates} from './deep_screening.js';
 import {executeOneApprovedDecision} from './approved_dispatch.js';
-import {pruneTerminalArticleText} from './retention.js';
+import {pruneTerminalArticleText,expireStaleCandidates} from './retention.js';
 import {readOneGlobalArticle} from './global_article.js';
 import {verifyCloudPostLike,verifyCloudCommentReadback,runAuthorizedPostAction,verifyExactCloudComment} from './cloud_substack_writes.js';
 import {withBrowserBudget} from './browser_budget.js';
@@ -172,7 +172,7 @@ export default {
     try{
      const outcome=await executeOneApprovedDecision(env);
      // Old terminal article bodies are compacted; IDs and execution audits remain.
-     try{await pruneTerminalArticleText(env);}catch{}
+     try{await expireStaleCandidates(env);await pruneTerminalArticleText(env);}catch{}
      await env.DB.prepare("UPDATE jobs SET status=? WHERE id=?").bind(String(outcome.status).slice(0,80),jobId).run();
      return json({ok:outcome.ok,status:outcome.status,publication_performed:outcome.publication_performed},outcome.ok?200:503);
     }catch{
