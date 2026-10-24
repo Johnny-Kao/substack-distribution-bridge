@@ -59,7 +59,7 @@ jobs:
           safe={'ai_inference_failed','invalid_ai_verdict','unavailable_or_daily_cap'}
           reason=data.get('reason')
           reason=reason if reason in safe else 'none_or_unknown'
-          ok=status==200 and data.get('ok') is True and data.get('publication_performed') is False and isinstance(data.get('reviewed'),int)
+          ok=status==200 and data.get('ok') is True and data.get('publication_performed') is False and isinstance(data.get('reviewed'),int) and data.get('reviewed')>=1
           print('Live private semantic screening: '+('PASS' if ok else 'FAIL')+'; HTTP '+str(status)+'; reviewed='+str(data.get('reviewed',0))+'; category='+reason)
           if reason=='unavailable_or_daily_cap':print('WARNING: AI daily cap deferred live review; this does not establish successful AI screening')
           sys.exit(0 if ok else 1)
