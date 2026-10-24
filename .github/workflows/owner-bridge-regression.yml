@@ -1,0 +1,25 @@
+name: Owner bridge regression tests
+on:
+  push:
+    branches: [master]
+    paths:
+      - "worker/src/owner_batch_api.js"
+      - "worker/src/github_owner_oidc.js"
+      - "worker/src/github_owner_import.js"
+      - "tests/owner_batch_api.test.mjs"
+      - "tests/github_owner_oidc.test.mjs"
+      - ".github/workflows/owner-bridge-regression.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run owner batch and signed OIDC regression tests
+        run: node --test tests/owner_batch_api.test.mjs tests/github_owner_oidc.test.mjs
