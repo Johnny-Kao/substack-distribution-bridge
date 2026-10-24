@@ -12,7 +12,7 @@ test("draft schema rejects generic, promotional or overlong comments",()=>{
 test("actual sampled discussion guides a private draft but never creates proposal",async()=>{
  const log=[],article="Mandate issuance creates a responsibility boundary. ".repeat(20);
  const details={id:"demo:101",title:"Delegated authority",full_text:article,comment_angle:"Who verifies?",evidence_signals:JSON.stringify({discussion:{status:"sampled",comments:[{id:3,excerpt:"What is the audit boundary?"}]}})};
- const DB={prepare(sql){const q={args:[],bind(...a){this.args=a;return this;},async first(){return sql.includes("COUNT(*) AS n")?{n:0}:details;},async all(){return {results:[]};},async run(){log.push({sql,args:this.args});return {meta:{changes:1}};}};return q;},async batch(items){log.push(...items.map(x=>({sql:x.sql,args:x.args})));}};
+ const DB={prepare(sql){const q={sql,args:[],bind(...a){this.args=a;return this;},async first(){return sql.includes("COUNT(*) AS n")?{n:0}:details;},async all(){return {results:[]};},async run(){log.push({sql,args:this.args});return {meta:{changes:1}};}};return q;},async batch(items){log.push(...items.map(x=>({sql:x.sql,args:x.args})));}};
  let seen;const AI={async run(_model,input){seen=input;return {response:{body,rationale:"Grounded in the article and sampled discussion."}};}};
  const outcome=await draftOneComment({DB,AI});
  assert.equal(outcome.ok,true);assert.equal(outcome.drafted,1);
