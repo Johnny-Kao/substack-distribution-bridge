@@ -1,11 +1,11 @@
 // Shared Cloudflare Browser Run Free budget and pacing across RSS and subject search.
 // Reserve atomically in D1 before every Quick Action. No paid overflow paths.
-export const MAX_ACTIONS_DAY = 38;
+export const MAX_ACTIONS_DAY = 44;
 // Reserve two additional actions ONLY for an exact, already owner-approved
 // comment: prior-state reconciliation and one attempt with its own readback.
 // Cloudflare Free bills browser minutes (10 min/day), not 38 actions/day.
 // The stricter existing 390s rolling-minute guard remains unchanged.
-export const MAX_APPROVED_ACTIONS_DAY = 40;
+export const MAX_APPROVED_ACTIONS_DAY = 46;
 export const MAX_BROWSER_MS_DAY = 390000;
 export const MIN_SECONDS_BETWEEN_ACTIONS = 15;
 
