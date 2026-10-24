@@ -8,6 +8,7 @@ import {deepReviewCandidates} from './deep_screening.js';
 import {readOneCandidateThread} from './comment_context.js';
 import {draftOneComment} from './comment_drafting.js';
 import {executeOneApprovedDecision} from './approved_dispatch.js';
+import {parseApprovedBatchStep,approvedBatchJobId} from './dispatch_window.js';
 import {importApprovedLikeBatch} from './sealed_like_batch.js';
 import {pruneTerminalArticleText,expireStaleCandidates} from './retention.js';
 import {readOneGlobalArticle} from './global_article.js';
@@ -195,16 +196,15 @@ export default {
     // operation per hour. Only step zero may service an approved Comment.
     // Additional steps are restricted to individually approved Likes.
     const requestBody=await req.json().catch(()=>({}));
-    const step=requestBody?.step===undefined?0:requestBody.step;
-    if(!Number.isSafeInteger(step)||step<0||step>=20)return json({ok:false,status:"invalid_batch_step",publication_performed:false},400);
-    const slot=Math.floor(Date.now()/3600000);
-    const jobId="approved_dispatch_"+slot+"_"+step;
+    const step=parseApprovedBatchStep(requestBody);
+    if(step===null)return json({ok:false,status:"invalid_batch_step",publication_performed:false},400);
+    const jobId=approvedBatchJobId(Date.now(),step);
     const acquired=await env.DB.prepare("INSERT OR IGNORE INTO jobs(id,kind,status) VALUES(?,'approved_dispatch','running')").bind(jobId).run();
     if(!acquired.meta?.changes)return json({ok:true,status:"already_triggered_this_slot",publication_performed:false});
     try{
      const outcome=await executeOneApprovedDecision(env,{likeOnly:step>0});
      // Old terminal article bodies are compacted; IDs and execution audits remain.
-     try{await expireStaleCandidates(env);await pruneTerminalArticleText(env);}catch{}
+     if(step===0){try{await expireStaleCandidates(env);await pruneTerminalArticleText(env);}catch{}}
      await env.DB.prepare("UPDATE jobs SET status=? WHERE id=?").bind(String(outcome.status).slice(0,80),jobId).run();
      return json({ok:outcome.ok,status:outcome.status,publication_performed:outcome.publication_performed},outcome.ok?200:503);
     }catch{
