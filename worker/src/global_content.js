@@ -59,7 +59,7 @@ export async function globalContentStep(req,env){
   // full article/context reading, semantic judgement and prior-state checks.
   let prequalified=0;
   for(const p of posts){
-   if(prequalified>=5)break;
+   if(prequalified>=10)break;
    const searchable=(p.title+" "+p.excerpt).toLowerCase();
    const hits=term.toLowerCase().split(/\s+/).filter(w=>w.length>2&&searchable.includes(w)).length;
    if(!hits||p.wordcount<150||p.excerpt.length<250||p.already_liked)continue;
