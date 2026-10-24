@@ -11,6 +11,7 @@ export const MIN_SECONDS_BETWEEN_ACTIONS = 15;
 
 export async function reserveBrowserAction(db,kind){
  const id=crypto.randomUUID();
+ const limit=["sealed_comment_reconcile","sealed_approved_comment"].includes(kind)?MAX_APPROVED_ACTIONS_DAY:MAX_ACTIONS_DAY;
  const result=await db.prepare(`
   INSERT INTO browser_requests(id,kind,status)
   SELECT ?,?,'reserved'
