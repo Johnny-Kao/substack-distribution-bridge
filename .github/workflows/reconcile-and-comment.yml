@@ -1,4 +1,4 @@
-name: Submit exact approved comment using verified minimal Substack schema
+name: Complete owner-approved comment with reserved free browser budget
 on:
   push:
     branches: [master]
