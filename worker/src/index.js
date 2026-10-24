@@ -4,6 +4,7 @@ import { feedHandler } from './feed.js';
 import { runSubjectDiscovery } from './subject_discovery.js';
 import {globalContentStep} from './global_content.js';
 import {screenGlobalCandidates} from './global_screening.js';
+import {deepReviewCandidates} from './deep_screening.js';
 import {readOneGlobalArticle} from './global_article.js';
 import {verifyCloudPostLike,verifyCloudCommentReadback,runAuthorizedPostAction,verifyExactCloudComment} from './cloud_substack_writes.js';
 import {withBrowserBudget} from './browser_budget.js';
@@ -157,6 +158,7 @@ export default {
    if(url.pathname==="/v1/global/step")return globalContentStep(req,env);
    if(url.pathname==="/v1/global/read")return readOneGlobalArticle(req,env);
    if(url.pathname==="/v1/global/screen"&&req.method==="POST")return json(await screenGlobalCandidates(env));
+   if(url.pathname==="/v1/global/deep-review"&&req.method==="POST")return json(await deepReviewCandidates(env));
    if(url.pathname==="/v1/global/verify-comment-readback"&&req.method==="POST"){
     const row=await env.DB.prepare("SELECT url,id FROM global_posts WHERE full_read_at IS NOT NULL ORDER BY full_read_at DESC LIMIT 1").first();
     if(!row)return json({error:"no_private_article_for_comment_probe",publication_performed:false},503);
