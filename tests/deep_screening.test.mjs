@@ -17,7 +17,7 @@ test("deep review reads stored full article, uses distinct reasoning model, and 
  const DB=db();let selected,request;
  const AI={async run(model,args){selected=model;request=args;return {response:JSON.stringify(response)};}};
  const outcome=await deepReviewCandidates({AI,DB});
- assert.deepEqual(outcome,{ok:true,reviewed:1,stage:"deep_review",publication_performed:false});
+ assert.deepEqual(outcome,{ok:true,reviewed:1,stage:"deep_review",decision_handoff:"needs_discussion_and_exact_comment",publication_performed:false});
  assert.equal(selected,DEEP_MODEL);
  assert.ok(request.messages[1].content.includes(article));
  assert.ok(request.messages[1].content.includes("COMMENT THREAD: not fetched"));
