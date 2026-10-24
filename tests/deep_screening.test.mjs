@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {webcrypto} from "node:crypto";
-import {DEEP_MODEL,parseDeepVerdict,deepReviewCandidates} from "../worker/src/deep_screening.js";
+import {DEEP_MODEL,parseDeepVerdict,deepReviewCandidates,evidenceAnchors} from "../worker/src/deep_screening.js";
 if(!globalThis.crypto)globalThis.crypto=webcrypto;
 const article="A family office delegation policy should define a mandate, record evidence, and preserve authority boundaries. ".repeat(15);
-const response={decision:"comment_review",rationale:"Proof must cover the whole decision chain.",angle:"Ask how the authorization trail is reviewed by the investment committee.",evidence_quote:"preserve authority boundaries",risk:"No evidence about technical enforcement in the excerpt."};
+const response={decision:"comment_review",rationale:"Proof must cover the whole decision chain.",angle:"Ask how the authorization trail is reviewed by the investment committee.",evidence_anchor:1,risk:"No evidence about technical enforcement in the excerpt."};
 test("second stage rejects fabricated evidence quotes and unauthorized classifications",()=>{
- assert.deepEqual(parseDeepVerdict({response:JSON.stringify(response)},article),response);
- assert.equal(parseDeepVerdict({response:JSON.stringify({...response,evidence_quote:"Never present in the article"})},article),null);
+ assert.equal(parseDeepVerdict({response:JSON.stringify(response)},article).evidence_quote,evidenceAnchors(article)[0]);
+ assert.equal(parseDeepVerdict({response:JSON.stringify({...response,evidence_anchor:999})},article),null);
  assert.equal(parseDeepVerdict({response:JSON.stringify({...response,decision:"post_now"})},article),null);
 });
 function db(candidate={id:"alpha:123",title:"Delegation evidence",full_text:article,score:75,semantic_verdict:"comment_review",semantic_rationale:"Relevant"}){
@@ -24,10 +24,10 @@ test("deep review reads stored full article, uses distinct reasoning model, and 
  assert.equal(DB.calls.length,1);
  const save=DB.calls[0][0];
  assert.equal(JSON.parse(save.args[0]).discussion_context,"not_fetched");
- assert.equal(JSON.parse(save.args[0]).evidence_quote,response.evidence_quote);
+ assert.equal(JSON.parse(save.args[0]).evidence_quote,evidenceAnchors(article)[0]);
 });
 test("invalid model evidence leaves D1 untouched",async()=>{
- const DB=db(),AI={run:async()=>({response:JSON.stringify({...response,evidence_quote:"Unrelated text"})})};
+ const DB=db(),AI={run:async()=>({response:JSON.stringify({...response,evidence_anchor:999})})};
  const result=await deepReviewCandidates({AI,DB});
  assert.equal(result.ok,false);assert.equal(result.reason,"invalid_deep_verdict");assert.equal(DB.calls.length,0);
 });
