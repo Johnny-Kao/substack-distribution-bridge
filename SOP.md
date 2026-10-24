@@ -68,3 +68,17 @@ Private targeting weights, source lists, draft histories, engagement evidence, r
 - Like execution cap: 20 per rolling 24 hours across the system. D1 Browser Run still uses its unchanged 15-second gate, general action cap of 44/24h and 390s measured browser time/24h. The runner waits 17 seconds between dispatch calls. No paid overage or new Cloudflare Cron triggers are allowed.
 - Each approved task is verified separately against the live Substack account. Stop the batch if there are no approved tasks, quota is exhausted or a write outcome is unknown. Preserve unexecuted approvals for future hourly runs; never replay uncertain writes.
 - Verified unit acceptance: 57 JS and 18 Python tests with cloud deployment #40116063090. Live multiple-Like batch outcome requires separate GitHub Actions evidence.
+
+## Reusable owner approval through the ChatGPT GitHub connector (2026-10-25)
+
+When the owner explicitly selects up to 20 Like/Skip decisions, a future ChatGPT session should **actually submit those decisions**, not stop at a draft or ask for OWNER_WRITE_KEY:
+
+1. Confirm exact canonical article URL, numeric Substack post ID, title and Like/Skip outcome for every selected item. Do not infer approval from model recommendations.
+2. Read the PUBLIC `docs/owner-approval-public-key.pem` through GitHub. Build a unique `batch_id` and a private `{"batch_id":"...","confirmed_by_owner":true,"items":[{"choice":"like","post_id":123,"url":"https://writer.substack.com/p/article","title":"..."}]}` payload. Use `scripts/encrypt_owner_choices.py` in the private ChatGPT execution environment (requires cryptography). Do not write plaintext to GitHub, Issue comments, public PRs, CI inputs or logs.
+3. Commit ONLY RSA-OAEP/AES-GCM encrypted JSON to `private_envelopes/owner_batches/<batch-id>.enc.json` via the user's connected GitHub tool. The distinct new path triggers `.github/workflows/import-owner-choices.yml`.
+4. The authenticated GitHub Actions runner mints a short-lived OIDC JWT signed by GitHub. Cloudflare Worker verifies RS256 signature plus **owner actor ID, repo ID, audience, exact workflow, push event, and master ref** before decrypting. BRIDGE_KEY alone and plaintext GitHub access are not approvals. The Worker writes D1 batch+item+feedback+proposal atomically, blocking conflicting or uncertain actions.
+5. Read the actual GitHub import success/result (counts only) and report **D1 queued** distinctly from **Substack verified Like**. Hourly approved-only scheduler processes only validated approved Likes, up to 20 each run/rolling day, subject to shared free Browser Run quotas. If quota/ambiguous state prevents completion, keep approved entries and report the explicit reason.
+
+No new one-time hardcoded digest or cloud deployment is needed per batch. Skip only enters the private feedback ledger and does not post. Comment text is not accepted by this Like/Skip bridge. The existing exact comment workflow remains separately authorized.
+
+Live authentication proof #40122328176 and encrypted no-write cloud integration proof #40122927414 passed. The end-to-end sample used `validation_only:true`, persisted nothing and performed no public interaction. A live newly approved D1 batch requires an actual new user selection. This does not automatically authorize discoveries.
