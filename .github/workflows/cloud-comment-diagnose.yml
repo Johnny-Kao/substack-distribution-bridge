@@ -1,0 +1,36 @@
+name: Cloud-only comment capacity check
+on:
+  push:
+    branches: [master]
+    paths: [".github/workflows/cloud-comment-diagnose.yml"]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    env:
+      BRIDGE_URL: ${{ vars.BRIDGE_URL }}
+      BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
+    steps:
+      - name: Check private Worker 24h capacity; never write a public interaction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,urllib.request,sys
+          u=os.environ.get('BRIDGE_URL','').rstrip('/')
+          k=os.environ.get('BRIDGE_KEY','')
+          if not u.startswith('https://') or not k:
+              print('Capacity probe unconfigured');sys.exit(1)
+          r=urllib.request.Request(u+'/v1/status',headers={'Authorization':'Bearer '+k,'Accept':'application/json','User-Agent':'Mozilla/5.0'})
+          try:
+              with urllib.request.urlopen(r,timeout=30) as res:
+                  d=json.load(res)
+          except Exception:
+              print('Capacity probe inaccessible');sys.exit(1)
+          # Aggregate resource counters only; no article/author/session details.
+          print('Browser actions in rolling 24h: '+str(d.get('browser_requests_24h','unknown')))
+          print('Browser time in rolling 24h (ms): '+str(d.get('browser_ms_24h','unknown')))
+          print('Public comment attempted: no')
+          PY
