@@ -54,6 +54,30 @@ export default {
       }
     }catch(_){return json({error:"invalid_reconciliation_proof",publication_performed:false},400);}
   }
+  if(url.pathname==="/v1/global/preflight-approved-comment"&&req.method==="POST"){
+    try{
+      const expected="9b368097d3afd581ca4be17e3a0d3323e205ff9c168278d2eee864384117f608";
+      const raw=await req.json();
+      if(raw?.v!==1||typeof raw.key!=="string"||typeof raw.iv!=="string"||typeof raw.data!=="string")return json({error:"invalid_envelope"},400);
+      const fromB64=v=>Uint8Array.from(atob(v),x=>x.charCodeAt(0));
+      const pem=env.APPROVED_COMMENT_PRIVATE_PEM;
+      if(typeof pem!=="string")return json({error:"sealed_secret_missing"},503);
+      const der=fromB64(pem.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\\s/g,""));
+      const priv=await crypto.subtle.importKey("pkcs8",der,{name:"RSA-OAEP",hash:"SHA-256"},false,["decrypt"]);
+      const key=await crypto.subtle.decrypt({name:"RSA-OAEP"},priv,fromB64(raw.key));
+      const aes=await crypto.subtle.importKey("raw",key,{name:"AES-GCM"},false,["decrypt"]);
+      const plain=await crypto.subtle.decrypt({name:"AES-GCM",iv:fromB64(raw.iv)},aes,fromB64(raw.data));
+      const hash=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",plain))).map(v=>v.toString(16).padStart(2,"0")).join("");
+      if(hash!==expected)return json({error:"approval_hash_mismatch"},403);
+      const item=JSON.parse(new TextDecoder().decode(plain));
+      if(item?.action!=="comment"||item?.version!==1||typeof item.body!=="string")return json({error:"invalid_approved_action"},400);
+      const result=await withBrowserBudget(env.DB,"comment_preflight",()=>runAuthorizedPostAction(env,{target:item.target,postId:item.post_id,body:item.body,kind:"comment",approved:true,preflightOnly:true}));
+      return json({ok:result.ok,verified:result.verified,status:result.status,publication_performed:false});
+    }catch(e){
+      const code=String(e?.message||"unknown").replace(/[^a-z0-9_:]/gi,"_").slice(0,65);
+      return json({error:"comment_preflight_failed",code,publication_performed:false},code==="browser_free_budget_or_pacing"?429:503);
+    }
+  }
   if(url.pathname==="/v1/global/verify-approved-once"&&req.method==="POST"){
     try{
       const expected="9b368097d3afd581ca4be17e3a0d3323e205ff9c168278d2eee864384117f608";
