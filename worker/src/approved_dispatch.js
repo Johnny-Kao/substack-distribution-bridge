@@ -36,7 +36,18 @@ export async function executeOneApprovedDecision(env,{perform=runAuthorizedPostA
   ]);
   return {ok:true,status:"verified_executed",kind:row.kind,publication_performed:outcome.publication_performed===true};
  }catch(err){
-  if(String(err?.message)==="browser_free_budget_or_pacing"){
+  const errorCode=String(err?.message||"");
+  if(/^substack_action_rejected_403_/.test(errorCode)){
+   // Explicit upstream HTTP 403 is a deterministic rejected POST, not an
+   // ambiguous network timeout. Mark this one operation terminal while
+   // allowing other individually approved posts to proceed next hour.
+   await db.batch([
+    db.prepare("UPDATE operations SET status='rejected' WHERE id=? AND status='executing'").bind(row.id),
+    db.prepare("UPDATE proposals SET state='rejected' WHERE id=? AND state='executing'").bind(row.id)
+   ]);
+   return {ok:true,status:"declined_permission",publication_performed:false};
+  }
+  if(errorCode==="browser_free_budget_or_pacing"){
    // The admission gate denied entry before any browser write was attempted.
    await db.batch([
     db.prepare("DELETE FROM operations WHERE id=? AND status='executing'").bind(row.id),
