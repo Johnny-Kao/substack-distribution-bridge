@@ -12,6 +12,9 @@ import {reconcileOneOrphanLike} from './orphan_like_reconcile.js';
 import {recoverOnePinnedUnknownLike} from './recover_approved_like.js';
 import {parseApprovedBatchStep,approvedBatchJobId} from './dispatch_window.js';
 import {importApprovedLikeBatch} from './sealed_like_batch.js';
+import {ownerBatchPublicKey} from './owner_public_key.js';
+import {verifyOwnerWorkflowJwt} from './github_owner_oidc.js';
+import {importOwnerChoicesFromGithub} from './github_owner_import.js';
 import {pruneTerminalArticleText,expireStaleCandidates} from './retention.js';
 import {readOneGlobalArticle} from './global_article.js';
 import {verifyCloudPostLike,verifyCloudCommentReadback,runAuthorizedPostAction,verifyExactCloudComment} from './cloud_substack_writes.js';
@@ -25,8 +28,18 @@ export default {
  async fetch(req,env){
   const url=new URL(req.url);
   if(url.pathname==="/health")return json({ok:true,mode:"github_cloudflare_only",public_write_enabled:false});
+  if(url.pathname==="/v1/owner-approval-public-key"&&req.method==="GET")
+   return json(await ownerBatchPublicKey(env));
   if(url.pathname.startsWith("/v1/write/"))return writeHandler(req,env,url);
   if(!allow(req,env))return json({error:"unauthorized"},401);
+  if(url.pathname==="/v1/global/owner-identity-probe"&&req.method==="POST"){
+   const proof=await verifyOwnerWorkflowJwt(req.headers.get("X-GitHub-OIDC"));
+   return json({ok:proof.ok,reason:proof.ok?"verified":proof.reason,publication_performed:false},proof.ok?200:403);
+  }
+  if(url.pathname==="/v1/global/import-owner-choices"&&req.method==="POST"){
+   const result=await importOwnerChoicesFromGithub(env,req);
+   return json(result,result.ok?200:result.status||403);
+  }
   if(url.pathname==="/v1/global/recover-pinned-approved-like"&&req.method==="POST"){
    const envelope=await req.json().catch(()=>null);
    const result=await recoverOnePinnedUnknownLike(env,envelope);
