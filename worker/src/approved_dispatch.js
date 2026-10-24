@@ -31,7 +31,8 @@ export async function executeOneApprovedDecision(env,{perform=runAuthorizedPostA
   if(!outcome?.ok||outcome.verified!==true)throw Error("cloud_write_unverified");
   await db.batch([
    db.prepare("UPDATE operations SET status='succeeded',public_id=? WHERE id=? AND status='executing'").bind(outcome.public_id||null,row.id),
-   db.prepare("UPDATE proposals SET state='executed' WHERE id=? AND state='executing'").bind(row.id)
+   db.prepare("UPDATE proposals SET state='executed' WHERE id=? AND state='executing'").bind(row.id),
+   db.prepare("INSERT OR IGNORE INTO interaction_feedback(id,candidate_id,choice,source,reason,suggested_action,actual_body,outcome) SELECT ?,c.id,?,'verified_execution','',COALESCE(t.suggested_action,''),?,? FROM candidates c LEFT JOIN engagement_targets t ON t.id=c.id WHERE c.url=?").bind("verified_execution:"+row.id,row.kind,row.body,String(outcome.status||"verified"),row.target)
   ]);
   return {ok:true,status:"verified_executed",kind:row.kind,publication_performed:outcome.publication_performed===true};
  }catch(err){
