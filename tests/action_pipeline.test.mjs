@@ -13,7 +13,7 @@ test("candidate lifecycle makes next action explicit",()=>{
  assert.equal(actionStage({deepDecision:"like_review",proposalState:"executed"}),"executed");
  assert.equal(actionStage({deepDecision:"like_review",alreadyHandled:true}),"already_executed_or_uncertain");
 });
-function fixture({approved=true,halted=false,kind="like",body="",prior=null,quota=0}={}){
+function fixture({approved=true,halted=false,kind="like",body="",prior=null,quota=0,unresolved=0}={}){
  const target="https://sample.substack.com/p/test";
  const proposal={id:"decision_12345678",kind,target,body,body_hash:"",state:approved?"approved":"proposed",origin:"decision_pipeline_v1",post_id:123};
  const calls=[];
@@ -22,6 +22,7 @@ function fixture({approved=true,halted=false,kind="like",body="",prior=null,quot
    async first(){
     if(sql.includes("FROM write_policy"))return {halted:halted?1:0};
     if(sql.includes("FROM proposals p LEFT JOIN global_posts"))return approved?proposal:null;
+    if(sql.includes("FROM operations WHERE status IN ('executing','unknown')"))return {n:unresolved};
     if(sql.includes("FROM operations WHERE id="))return prior;
     if(sql.includes("COUNT(*) AS n"))return {n:quota};
     return null;
@@ -38,6 +39,16 @@ test("cron does nothing without exact approved proposal",async()=>{
  const DB=fixture({approved:false});let writes=0;
  const r=await executeOneApprovedDecision({DB},{perform:async()=>{writes++},budget:async()=>{writes++}});
  assert.equal(r.status,"no_approved_work");assert.equal(writes,0);assert.equal(DB.calls.length,0);
+});
+test("orphaned executing or unknown write blocks every other approved post",async()=>{
+ const DB=fixture({unresolved:1});
+ let externalWrites=0;
+ const result=await executeOneApprovedDecision({DB},{perform:async()=>{externalWrites++;},budget:async()=>{externalWrites++;}});
+ assert.equal(result.ok,true);
+ assert.equal(result.status,"needs_reconciliation");
+ assert.equal(result.publication_performed,false);
+ assert.equal(externalWrites,0);
+ assert.equal(DB.calls.length,0);
 });
 test("cron respects owner stop policy",async()=>{
  const DB=fixture({halted:true});let writes=0;
