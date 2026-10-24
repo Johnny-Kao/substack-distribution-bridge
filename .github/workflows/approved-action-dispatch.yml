@@ -1,7 +1,7 @@
 name: Execute owner-approved Substack decisions (cloud only)
 on:
   schedule:
-    - cron: '53 */3 * * *'
+    - cron: '17 * * * *'
   workflow_dispatch:
   push:
     branches: [master]
