@@ -22,7 +22,7 @@ test("deep review reads stored full article, uses distinct reasoning model, and 
  assert.ok(request.messages[1].content.includes(article));
  assert.ok(request.messages[1].content.includes("COMMENT THREAD: not fetched"));
  assert.equal(DB.calls.length,1);
- assert.equal(DB.attempts.length,1);
+ assert.equal(DB.attempts.length,2); // inference accounting + decision handoff state
  const save=DB.calls[0][0];
  assert.equal(JSON.parse(save.args[0]).discussion_context,"not_fetched");
  assert.equal(JSON.parse(save.args[0]).evidence_quote,evidenceAnchors(article)[0]);
