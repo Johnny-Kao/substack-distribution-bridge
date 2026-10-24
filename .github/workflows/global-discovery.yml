@@ -36,6 +36,12 @@ jobs:
           node --test tests/*.test.mjs
           python3 -m unittest discover -s tests -q
           (cd worker && npx wrangler deploy --dry-run --outdir=./.wrangler-verify)
+      - name: Apply idempotent private owner-feedback migration
+        working-directory: worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler d1 execute substack-distribution-private --remote --file=./migration_feedback.sql
       - name: Deploy the fully tested cloud Worker
         working-directory: worker
         run: |
