@@ -1,4 +1,4 @@
-name: Reconcile and finish one approved comment
+name: Diagnose and finish exact approved comment
 on:
   push:
     branches: [master]
@@ -56,7 +56,7 @@ jobs:
               sys.exit(1)
           open("/tmp/approved-comment-recovery-status","w").write(data["status"])
           PY
-      - name: Publish ONLY if exact readback proved absent, never automatically retry POST
+      - name: Submit one exact approved comment only after independent proof of absence
         shell: bash
         run: |
           set -euo pipefail
@@ -81,6 +81,7 @@ jobs:
           print("Authenticated Substack comment execution and exact-body readback: "+("PASS" if verified else "FAIL")+", HTTP "+str(status))
           if not verified:
               print("Failure category: "+str(data.get("error","unknown"))[:64])
+              print("Failure stage: "+str(data.get("code","not_provided"))[:64])
               print("Further retries prohibited without a new independent readback.")
               sys.exit(1)
           PY
