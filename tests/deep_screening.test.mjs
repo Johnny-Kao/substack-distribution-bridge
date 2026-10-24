@@ -11,7 +11,7 @@ test("second stage rejects fabricated evidence quotes and unauthorized classific
  assert.equal(parseDeepVerdict({response:JSON.stringify({...response,decision:"post_now"})},article),null);
 });
 function db(candidate={id:"alpha:123",title:"Delegation evidence",full_text:article,score:75,semantic_verdict:"comment_review",semantic_rationale:"Relevant"}){
- const calls=[];return {calls,prepare(sql){const stmt={bind(...a){this.args=a;return this;},async first(){if(sql.includes("COUNT(*) AS n"))return {n:0};return candidate;}};return stmt;},async batch(stmts){calls.push(stmts);}};
+ const calls=[],attempts=[];return {calls,attempts,prepare(sql){const stmt={bind(...a){this.args=a;return this;},async first(){if(sql.includes("COUNT(*) AS n"))return {n:0};return candidate;},async run(){attempts.push({sql,args:this.args});return {meta:{changes:1}};}};return stmt;},async batch(stmts){calls.push(stmts);}};
 }
 test("deep review reads stored full article, uses distinct reasoning model, and never posts",async()=>{
  const DB=db();let selected,request;
@@ -22,6 +22,7 @@ test("deep review reads stored full article, uses distinct reasoning model, and 
  assert.ok(request.messages[1].content.includes(article));
  assert.ok(request.messages[1].content.includes("COMMENT THREAD: not fetched"));
  assert.equal(DB.calls.length,1);
+ assert.equal(DB.attempts.length,1);
  const save=DB.calls[0][0];
  assert.equal(JSON.parse(save.args[0]).discussion_context,"not_fetched");
  assert.equal(JSON.parse(save.args[0]).evidence_quote,evidenceAnchors(article)[0]);
