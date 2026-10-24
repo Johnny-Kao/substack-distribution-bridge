@@ -42,12 +42,16 @@ export function parseDeepVerdict(result,article){
 export async function deepReviewCandidates(env){
  if(!env.AI)return {ok:true,reviewed:0,reason:"ai_not_configured",publication_performed:false};
  const total=await env.DB.prepare("SELECT COUNT(*) AS n FROM ai_usage WHERE created_at>=datetime('now','-1 day')").first();
- const deep=await env.DB.prepare("SELECT COUNT(*) AS n FROM ai_usage WHERE kind='global_deep_review' AND created_at>=datetime('now','-1 day')").first();
+ const deep=await env.DB.prepare("SELECT COUNT(*) AS n FROM ai_usage WHERE kind IN ('global_deep_review','global_deep_attempt') AND created_at>=datetime('now','-1 day')").first();
  if(Number(total?.n||0)>=8||Number(deep?.n||0)>=2)return {ok:true,reviewed:0,reason:"ai_daily_cap",publication_performed:false};
  const candidate=await env.DB.prepare("SELECT t.id,c.title,g.full_text,t.score,t.semantic_verdict,t.semantic_rationale FROM engagement_targets t JOIN candidates c ON t.id=c.id JOIN global_posts g ON g.id=CAST(substr(t.id,length(c.pub)+2) AS INTEGER) AND g.subdomain=c.pub WHERE t.review_state='semantically_reviewed' AND t.semantic_verdict IN ('comment_review','like_review') AND t.score>=60 AND length(g.full_text)>=600 AND json_extract(t.evidence_signals,'$.deep_review') IS NULL ORDER BY t.score DESC,g.published DESC LIMIT 1").first();
  if(!candidate)return {ok:true,reviewed:0,reason:"no_qualified_candidate",publication_performed:false};
  const article=String(candidate.full_text||"").slice(0,MAX_DEEP_CHARS);
  const anchors=evidenceAnchors(article);
+ // Charge each attempt against the local daily cap, even if inference returns
+ // unusable JSON. Without this, a scheduled error can exhaust free Neurons.
+ const attemptId=crypto.randomUUID();
+ await env.DB.prepare("INSERT INTO ai_usage(id,kind) VALUES(?,?)").bind(attemptId,"global_deep_attempt").run();
  let result;
  try{
   result=await env.AI.run(DEEP_MODEL,{
@@ -66,7 +70,7 @@ export async function deepReviewCandidates(env){
  };
  await env.DB.batch([
   env.DB.prepare("UPDATE engagement_targets SET evidence_signals=json_set(evidence_signals,'$.deep_review',json(?)),updated_at=CURRENT_TIMESTAMP WHERE id=? AND json_extract(evidence_signals,'$.deep_review') IS NULL").bind(JSON.stringify(evidence),candidate.id),
-  env.DB.prepare("INSERT INTO ai_usage(id,kind) VALUES(?,?)").bind(crypto.randomUUID(),"global_deep_review")
+  env.DB.prepare("UPDATE ai_usage SET kind='global_deep_review' WHERE id=?").bind(attemptId)
  ]);
  return {ok:true,reviewed:1,stage:"deep_review",publication_performed:false};
 }
