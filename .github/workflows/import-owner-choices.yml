@@ -56,7 +56,7 @@ jobs:
                  'workflow':claims.get('workflow_ref')=='Johnny-Kao/substack-distribution-bridge/.github/workflows/import-owner-choices.yml@refs/heads/master',
                  'event':claims.get('event_name')=='push',
                  'ref':claims.get('ref')=='refs/heads/master',
-                 'sub':claims.get('sub')=='repo:Johnny-Kao/substack-distribution-bridge:ref:refs/heads/master'
+                 'sub':str(claims.get('sub','')).startswith('repo:Johnny-Kao/substack-distribution-bridge:')
               }
               print('OIDC public claim checks: '+', '.join(k+'='+str(v) for k,v in expected.items()))
               raise SystemExit('OIDC owner authentication failed')
