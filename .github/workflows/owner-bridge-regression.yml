@@ -21,5 +21,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install existing Worker test dependencies
+        run: npm install --prefix worker --no-package-lock --ignore-scripts --no-audit --no-fund
       - name: Run owner batch and signed OIDC regression tests
         run: node --test tests/owner_batch_api.test.mjs tests/github_owner_oidc.test.mjs
