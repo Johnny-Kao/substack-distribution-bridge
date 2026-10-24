@@ -8,7 +8,7 @@ export function stripArticleHTML(html){
  return html.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi," ")
   .replace(/<[^>]+>/g," ")
   .replace(/&(?:nbsp|amp|lt|gt|quot|apos);/g,x=>({ "&nbsp;":" ","&amp;":"&","&lt;":"<","&gt;":">","&quot;":'"',"&apos;":"'"}[x]||x))
-  .replace(/\s+/g," ").trim().slice(0,16000);
+  .replace(/\s+/g," ").trim().slice(0,42000);
 }
 export async function readOneGlobalArticle(req,env){
  if(req.method!=="POST")return reply({error:"method_not_allowed"},405);
