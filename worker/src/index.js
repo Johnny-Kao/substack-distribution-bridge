@@ -23,6 +23,21 @@ export default {
   if(url.pathname==="/health")return json({ok:true,mode:"github_cloudflare_only",public_write_enabled:false});
   if(url.pathname.startsWith("/v1/write/"))return writeHandler(req,env,url);
   if(!allow(req,env))return json({error:"unauthorized"},401);
+  if(url.pathname==="/v1/global/setup-feedback"&&req.method==="POST"){
+   // BRIDGE_KEY-authenticated fixed schema bootstrap. No dynamic SQL is accepted.
+   const commands=[
+    "CREATE TABLE IF NOT EXISTS interaction_feedback (id TEXT PRIMARY KEY,candidate_id TEXT NOT NULL,choice TEXT NOT NULL CHECK(choice IN ('like','comment','skip')),source TEXT NOT NULL CHECK(source IN ('owner_choice','owner_approval','owner_rejection','verified_execution')),reason TEXT NOT NULL DEFAULT '',suggested_action TEXT NOT NULL DEFAULT '',actual_body TEXT NOT NULL DEFAULT '',outcome TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+    "CREATE INDEX IF NOT EXISTS idx_feedback_candidate_time ON interaction_feedback(candidate_id,created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_feedback_recent ON interaction_feedback(created_at DESC,choice)"
+   ];
+   try{
+    for(const statement of commands)await env.DB.prepare(statement).run();
+    const present=await env.DB.prepare("SELECT COUNT(*) AS n FROM interaction_feedback").first();
+    return json({ok:true,ready:true,existing_feedback_count:present?.n||0,publication_performed:false});
+   }catch{
+    return json({ok:false,error:"fixed_feedback_schema_init_failed",publication_performed:false},503);
+   }
+  }
   // One strictly bounded recovery following independently verified absence.
   if(url.pathname==="/v1/global/reconcile-approved-once"&&req.method==="POST"){
     const expected="9b368097d3afd581ca4be17e3a0d3323e205ff9c168278d2eee864384117f608";
