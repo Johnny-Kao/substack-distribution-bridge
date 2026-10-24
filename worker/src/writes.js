@@ -3,6 +3,7 @@
 import {ownerSubjectProbe} from "./subject.js";
 import {verifyCloudPostLike,runAuthorizedPostAction} from "./cloud_substack_writes.js";
 import {withBrowserBudget} from "./browser_budget.js";
+import {listDecisionOutbox,stageApprovedDecisionCandidate} from "./action_pipeline.js";
 const reply=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 const kinds=new Set(["like","comment","note"]);
 const limits={like:10,comment:3,note:2};
@@ -28,7 +29,7 @@ function validate(p){
  if(p.origin==="qc_auto"&&p.kind!=="like")return false;
  if(p.kind==="comment"&&(p.body.trim().length<20||p.body.length>750))return false;
  if(p.kind==="note"&&(p.body.trim().length<20||p.body.length>1200))return false;
- if(typeof p.origin!=="string"||!["manual","qc_auto"].includes(p.origin))return false;
+ if(typeof p.origin!=="string"||!["manual","qc_auto","decision_pipeline_v1"].includes(p.origin))return false;
  return true;
 }
 async function innerWriteHandler(request,env,url){
@@ -76,6 +77,14 @@ async function innerWriteHandler(request,env,url){
   if(!draft||draft.length>1800)throw Error("unusable_private_ai_output");
   await db.prepare("INSERT INTO ai_usage(id,kind) VALUES(?,?)").bind(crypto.randomUUID(),input.kind).run();
   return reply({ok:true,kind:input.kind,draft,requires_user_approval:true,publication_performed:false});
+ }
+ if(url.pathname==="/v1/write/action-outbox"&&request.method==="GET"){
+   return reply(await listDecisionOutbox(env));
+ }
+ if(url.pathname==="/v1/write/propose-decision"&&request.method==="POST"){
+   const input=await request.json().catch(()=>null);
+   const outcome=await stageApprovedDecisionCandidate(env,{id:input?.id,kind:input?.kind,body:input?.body,discussionReviewed:input?.discussion_reviewed===true});
+   return reply(outcome,outcome.ok?200:outcome.status||409);
  }
  if(url.pathname==="/v1/write/engagement-targets"&&request.method==="GET"){
   const rows=await db.prepare("SELECT c.id,c.pub,c.title,c.url,c.published,t.score,t.suggested_action,t.word_count,t.evidence_excerpt,t.evidence_signals,t.review_state,t.semantic_verdict,t.semantic_rationale,t.comment_angle,EXISTS(SELECT 1 FROM operations o WHERE o.target=c.url AND o.kind IN ('like','comment') AND o.status IN ('executing','succeeded','unknown')) AS already_handled FROM engagement_targets t JOIN candidates c ON c.id=t.id ORDER BY (t.review_state='pending_semantic_review') DESC,t.score DESC,c.created_at DESC LIMIT 25").all();
