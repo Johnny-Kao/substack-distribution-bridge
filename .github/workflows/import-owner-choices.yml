@@ -1,0 +1,71 @@
+name: Import owner-confirmed encrypted article choices to Cloudflare D1
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/import-owner-choices.yml"
+      - "private_envelopes/owner_batches/**"
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: substack-owner-approved-batch-ingress
+  cancel-in-progress: false
+jobs:
+  authenticate-and-import:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      BRIDGE_URL: ${{ vars.BRIDGE_URL }}
+      BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify GitHub-issued owner/workflow identity before importing
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,urllib.parse,urllib.request
+          base=os.environ['BRIDGE_URL'].rstrip('/')
+          aud=base+'/v1/global/import-owner-choices'
+          origin=os.environ['ACTIONS_ID_TOKEN_REQUEST_URL']
+          sep='&' if '?' in origin else '?'
+          url=origin+sep+'audience='+urllib.parse.quote(aud,safe='')
+          request=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
+          with urllib.request.urlopen(request,timeout=25) as r: proof=json.load(r)['value']
+          with open('/tmp/github-owner-proof','w',encoding='utf-8') as f:f.write(proof)
+          os.chmod('/tmp/github-owner-proof',0o600)
+          probe=urllib.request.Request(base+'/v1/global/owner-identity-probe',method='POST',data=b'{}',
+              headers={'Authorization':'Bearer '+os.environ['BRIDGE_KEY'],
+                       'X-GitHub-OIDC':proof,'Content-Type':'application/json','User-Agent':'Mozilla/5.0'})
+          with urllib.request.urlopen(probe,timeout=35) as r: result=json.load(r)
+          if result.get('ok') is not True:raise SystemExit('GitHub owner identity proof not verified')
+          print('Owner OIDC authorization verified; no article targets or publication performed')
+          PY
+      - name: Import only encrypted approvals ADDED by this owner commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,re,subprocess,urllib.request
+          paths=subprocess.check_output(['git','diff-tree','--no-commit-id','--name-only','--diff-filter=A','-r','HEAD','--','private_envelopes/owner_batches/'],text=True).splitlines()
+          paths=[p for p in paths if re.fullmatch(r'private_envelopes/owner_batches/[A-Za-z0-9_-]{8,100}\.enc\.json',p)]
+          if len(paths)>20:raise SystemExit('Too many encrypted approval files in one commit')
+          if not paths:
+              print('No newly added owner approval files; OIDC probe completed')
+          proof=open('/tmp/github-owner-proof',encoding='utf-8').read().strip()
+          for p in paths:
+              with open(p,'rb') as fd: ciphertext=fd.read()
+              if len(ciphertext)>25000:raise SystemExit('Encrypted payload exceeded size limit')
+              url=os.environ['BRIDGE_URL'].rstrip('/')+'/v1/global/import-owner-choices'
+              req=urllib.request.Request(url,method='POST',data=ciphertext,
+                  headers={'Authorization':'Bearer '+os.environ['BRIDGE_KEY'],'X-GitHub-OIDC':proof,
+                           'Content-Type':'application/json','User-Agent':'Mozilla/5.0'})
+              with urllib.request.urlopen(req,timeout=65) as r: result=json.load(r)
+              if result.get('ok') is not True:raise SystemExit('Encrypted owner-choice import failed')
+              selected=result.get('selected',{})
+              print('Owner batch accepted: Like='+str(selected.get('like',0))+
+                    ', Skip='+str(selected.get('skip',0))+
+                    ', already recorded='+str(result.get('already_recorded',False)))
+          print('No private article names, URLs, decisions, tokens or comments printed')
+          PY
