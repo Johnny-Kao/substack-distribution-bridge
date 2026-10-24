@@ -1,0 +1,64 @@
+name: Enroll exact owner-approved Like batch (sealed)
+on:
+  push:
+    branches: [master]
+    paths:
+      - "private_envelopes/approved_fo_wm_pb_likes_2026-10-25.enc.json"
+permissions:
+  contents: read
+concurrency:
+  group: exact-private-owner-like-import-once
+  cancel-in-progress: false
+jobs:
+  import:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    env:
+      BRIDGE_URL: ${{ vars.BRIDGE_URL }}
+      BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Import only the exact digest-pinned encrypted owner-approved choices
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${BRIDGE_URL:-}" == https://* ]] && [[ -n "${BRIDGE_KEY:-}" ]] || exit 1
+          code=$(curl --retry 0 --silent --show-error --max-time 90 \
+            -o /tmp/owner-approval-result.json -w '%{http_code}' \
+            -X POST "${BRIDGE_URL%/}/v1/global/import-approved-like-batch" \
+            -H "Authorization: Bearer ${BRIDGE_KEY}" \
+            -H 'Content-Type: application/json' \
+            --data-binary @private_envelopes/approved_fo_wm_pb_likes_2026-10-25.enc.json)
+          python3 - "$code" <<'PY'
+          import json,sys
+          try:r=json.load(open("/tmp/owner-approval-result.json",encoding="utf8"))
+          except Exception:r={}
+          good=int(sys.argv[1])==200 and r.get("ok") is True and r.get("accepted")==10 and r.get("duplicate_safe") is True
+          print("Owner-approved encrypted Like import: "+("PASS" if good else "FAIL")+", status="+str(sys.argv[1]))
+          if good:
+              print("Owner approvals processed="+str(r.get("accepted"))+"; eligible="+str(r.get("eligible_without_prior_write"))+"; approved waiting="+str(r.get("pending_approved_total")))
+          else:
+              print("Import error category: "+str(r.get("error","invalid_result"))[:48])
+          print("No plaintext user preferences, targets or login credentials sent to GitHub")
+          sys.exit(0 if good else 1)
+          PY
+      - name: Wake approved-only Cloudflare executor once
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --retry 0 --silent --show-error --max-time 115 \
+            -o /tmp/owner-dispatch-result.json -w '%{http_code}' \
+            -X POST "${BRIDGE_URL%/}/v1/global/dispatch-approved" \
+            -H "Authorization: Bearer ${BRIDGE_KEY}" \
+            -H 'Content-Type: application/json' -d '{}')
+          python3 - "$code" <<'PY'
+          import json,sys
+          try:r=json.load(open("/tmp/owner-dispatch-result.json",encoding="utf8"))
+          except Exception:r={}
+          status=r.get("status","unknown")
+          safe={"no_approved_work","paused","already_triggered_this_slot","verified_executed","already_executed","claimed_elsewhere","daily_interaction_cap","deferred_browser_quota"}
+          valid=int(sys.argv[1])==200 and r.get("ok") is True and status in safe
+          print("First approved-only dispatch: "+("PASS" if valid else "FAIL")+", state="+(status if status in safe else "unverified"))
+          print("Hourly approved-outbox scheduler handles any remaining approved items")
+          sys.exit(0 if valid else 1)
+          PY
