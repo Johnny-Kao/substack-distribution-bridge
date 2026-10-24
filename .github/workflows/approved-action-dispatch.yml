@@ -44,3 +44,19 @@ jobs:
           print('This Action cannot choose targets, draft content, or approve anything.')
           sys.exit(0 if ok else 1)
           PY
+      - name: Verify private outbox progress aggregates only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,urllib.request
+          req=urllib.request.Request(os.environ['BRIDGE_URL'].rstrip('/')+'/v1/status',headers={'Authorization':'Bearer '+os.environ['BRIDGE_KEY'],'User-Agent':'Mozilla/5.0','Accept':'application/json'})
+          with urllib.request.urlopen(req,timeout=30) as response:
+              info=json.load(response)
+          x=info.get('action_outbox',{})
+          for key in ['total','awaiting_approval','ready_to_execute','completed','needs_reconciliation']:
+              value=x.get(key)
+              if not isinstance(value,int):raise SystemExit('Private action outbox status not configured: '+key)
+          print('Decision outbox: awaiting_approval='+str(x['awaiting_approval'])+', approved='+str(x['ready_to_execute'])+', completed='+str(x['completed'])+', uncertain='+str(x['needs_reconciliation']))
+          print('Article/private target details are not printed')
+          PY
