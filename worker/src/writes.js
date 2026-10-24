@@ -50,7 +50,7 @@ async function innerWriteHandler(request,env,url){
   if(typeof id!=="string"||!/^[a-zA-Z0-9_-]{8,100}$/.test(id))return reply({error:"invalid_batch_id"},400);
   const b=await db.prepare("SELECT batch_id,item_count,created_at FROM owner_choice_batches WHERE batch_id=?").bind(id).first();
   if(!b)return reply({error:"batch_not_found"},404);
-  const q=await db.prepare("SELECT p.state,COUNT(*) AS n FROM proposals p JOIN interaction_feedback f ON f.candidate_id=(SELECT c.id FROM candidates c WHERE c.url=p.target LIMIT 1) WHERE f.id LIKE ? AND p.kind='like' GROUP BY p.state").bind("owner_approval:"+id+":%").all();
+  const q=await db.prepare("SELECT CASE WHEN i.choice='skip' THEN 'skipped' ELSE COALESCE(p.state,'missing_proposal') END AS state,COUNT(*) AS n FROM owner_batch_items i LEFT JOIN proposals p ON p.kind='like' AND p.target=i.url WHERE i.batch_id=? GROUP BY CASE WHEN i.choice='skip' THEN 'skipped' ELSE COALESCE(p.state,'missing_proposal') END").bind(id).all();
   const states={};for(const x of q.results||[])states[x.state]=x.n;
   return reply({ok:true,batch_id:id,items:b.item_count,states,publication_performed:false});
  }
