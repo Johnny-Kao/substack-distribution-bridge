@@ -5,9 +5,10 @@ import {verifyCloudPostLike,runAuthorizedPostAction} from "./cloud_substack_writ
 import {withBrowserBudget} from "./browser_budget.js";
 import {listDecisionOutbox,stageApprovedDecisionCandidate} from "./action_pipeline.js";
 import {recordFeedback,feedbackEventId,feedbackStats} from "./feedback_learning.js";
+import {enqueueOwnerChoices,MAX_SELECTED_LIKES} from "./owner_batch_api.js";
 const reply=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 const kinds=new Set(["like","comment","note"]);
-const limits={like:20,comment:3,note:2};
+const limits={like:MAX_SELECTED_LIKES,comment:3,note:2};
 const encoder=new TextEncoder();
 const isoDay=()=>new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Tokyo"});
 const digest=async text=>Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",encoder.encode(text)))).map(x=>x.toString(16).padStart(2,"0")).join("");
@@ -37,6 +38,23 @@ async function innerWriteHandler(request,env,url){
  if(!await auth(request,env))return reply({error:"owner_write_permission_required"},403);
  const db=env.DB;
  if(url.pathname==="/v1/write/subject-probe")return ownerSubjectProbe(request,env);
+ // Generic owner-approved batch: explicit exact article targets + Like/Skip.
+ // GitHub's BRIDGE_KEY is deliberately insufficient; no public repo relay.
+ if(url.pathname==="/v1/write/approve-selected-batch"&&request.method==="POST"){
+  const input=await request.json().catch(()=>null);
+  const result=await enqueueOwnerChoices(env,input);
+  return reply(result,result.ok?200:result.status||400);
+ }
+ if(url.pathname==="/v1/write/owner-batch-status"&&request.method==="GET"){
+  const id=url.searchParams.get("batch_id");
+  if(typeof id!=="string"||!/^[a-zA-Z0-9_-]{8,100}$/.test(id))return reply({error:"invalid_batch_id"},400);
+  const b=await db.prepare("SELECT batch_id,item_count,created_at FROM owner_choice_batches WHERE batch_id=?").bind(id).first();
+  if(!b)return reply({error:"batch_not_found"},404);
+  const q=await db.prepare("SELECT p.state,COUNT(*) AS n FROM proposals p JOIN interaction_feedback f ON f.candidate_id=(SELECT c.id FROM candidates c WHERE c.url=p.target LIMIT 1) WHERE f.id LIKE ? AND p.kind='like' GROUP BY p.state").bind("owner_approval:"+id+":%").all();
+  const states={};for(const x of q.results||[])states[x.state]=x.n;
+  return reply({ok:true,batch_id:id,items:b.item_count,states,publication_performed:false});
+ }
+
  if(url.pathname==="/v1/write/policy"&&request.method==="GET"){
   const p=await halted(db);
    return reply({halted:!!p.halted,reason:p.reason,limits,auto_like_max:5,approval_for:["comment","note"],write_enabled:true,execution_environment:"cloudflare_browser",requires_exact_approved_proposal:true});
