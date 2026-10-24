@@ -7,7 +7,7 @@ if(!globalThis.crypto)globalThis.crypto=webcrypto;
 const items=(n=3)=>Array.from({length:n},(_,i)=>({choice:i%3===2?"skip":"like",url:"https://test-"+(i+1)+".substack.com/p/article-"+(i+1),post_id:100001+i,title:"Investing essay "+i}));
 const request=()=>({headers:new Headers({"Content-Length":"200","X-GitHub-OIDC":"signed-token"}),async json(){return {v:1,key:"encrypted",iv:"encrypted",data:"encrypted"};}});
 const make=(i=items())=>({batch_id:"owner-batch-20261025-01",confirmed_by_owner:true,items:i});
-function fakeDB({existing=null,mapping=null,priorWrite=null,halted=false,batch=null}={}){
+function fakeDB({existing=null,mapping=null,reverseMapping=null,priorWrite=null,halted=false,batch=null}={}){
  const queries=[],batches=[];
  return {queries,batches,prepare(sql){
   return {sql,bind(...args){this.args=args;return this;},
@@ -15,7 +15,7 @@ function fakeDB({existing=null,mapping=null,priorWrite=null,halted=false,batch=n
     queries.push({sql,args:this.args});
     if(sql.includes("FROM write_policy"))return {halted:halted?1:0};
     if(sql.includes("FROM owner_choice_batches"))return batch;
-    if(sql.includes("FROM approved_external_posts"))return mapping;
+    if(sql.includes("FROM approved_external_posts"))return sql.includes("WHERE post_id=")?reverseMapping:mapping;
     if(sql.includes("FROM proposals"))return existing;
     if(sql.includes("FROM operations"))return priorWrite;
     return null;
@@ -84,4 +84,24 @@ test("cryptographically verified identity can import arbitrary future approved b
  assert.equal(r.ok,true);
  assert.equal(saved.batch_id,batch.batch_id);
  assert.equal(saved.items[0].post_id,199999999);
+});
+
+test("existing Post ID bound to another canonical URL rejects the entire batch",async()=>{
+ const DB=fakeDB({reverseMapping:{url:"https://another.substack.com/p/other"}});
+ const result=await enqueueOwnerChoices({DB},make());
+ assert.equal(result.status,409);
+ assert.equal(result.error,"post_id_url_identity_conflict");
+ assert.equal(DB.batches.length,0);
+});
+test("unknown or executing like remains fail-closed, skip creates no proposals",async()=>{
+ for(const state of ["unknown","executing"]){
+  const DB=fakeDB({priorWrite:{status:state}});
+  const result=await enqueueOwnerChoices({DB},make());
+  assert.equal(result.status,409);
+  assert.equal(DB.batches.length,0);
+ }
+ const DB=fakeDB();
+ const result=await enqueueOwnerChoices({DB},make([{...items(1)[0],choice:"skip"}]));
+ assert.equal(result.ok,true);
+ assert.equal(DB.batches[0].filter(s=>s.sql.includes("INTO proposals")).length,0);
 });
