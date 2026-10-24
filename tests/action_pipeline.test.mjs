@@ -21,6 +21,7 @@ function fixture({approved=true,halted=false,kind="like",body="",prior=null,quot
   const stmt={sql,params:[],bind(...args){this.params=args;return this;},
    async first(){
     if(sql.includes("FROM write_policy"))return {halted:halted?1:0};
+    if(sql.includes("FROM approved_like_recovery"))return {proposal_id:proposal.id};
     if(sql.includes("FROM proposals p LEFT JOIN global_posts"))return approved?proposal:null;
     if(sql.includes("FROM operations WHERE status IN ('executing','unknown')"))return {n:unresolved};
     if(sql.includes("FROM operations WHERE id="))return prior;
@@ -69,6 +70,23 @@ test("approved exact Like is executed once, checked, and marked complete",async(
  assert.equal(calls.length,1);assert.equal(calls[0].postId,123);assert.equal(calls[0].approved,true);
  assert.ok(DB.calls.some(x=>x.sql.includes("UPDATE operations SET status='succeeded'")));
  assert.ok(DB.calls.some(x=>x.sql.includes("UPDATE proposals SET state='executed'")));
+});
+test("one journaled originally ambiguous Like can be retried after authenticated negative readback",async()=>{
+ const DB=fixture({prior:{status:"reconciled_unliked"}});
+ DB.proposal.body_hash=await sha256("like\u0000"+DB.proposal.target+"\u0000");
+ const res=await executeOneApprovedDecision({DB},{perform:async()=>({ok:true,verified:true,status:"liked",publication_performed:true}),budget:async(_db,_kind,fn)=>fn()});
+ assert.equal(res.ok,true);
+ assert.equal(res.status,"verified_executed");
+ assert.ok(DB.calls.some(x=>x.sql.includes("UPDATE operations SET status='executing',created_at=CURRENT_TIMESTAMP")));
+ assert.ok(!DB.calls.some(x=>x.sql.includes("INSERT INTO operations")));
+});
+test("journaled retry admission refusal preserves prior reconciliation and approved task",async()=>{
+ const DB=fixture({prior:{status:"reconciled_unliked"}});
+ DB.proposal.body_hash=await sha256("like\u0000"+DB.proposal.target+"\u0000");
+ const res=await executeOneApprovedDecision({DB},{perform:async()=>{throw Error("Should not write")},budget:async()=>{throw Error("browser_free_budget_or_pacing")}});
+ assert.equal(res.status,"deferred_browser_quota");
+ assert.ok(DB.calls.some(x=>x.sql.includes("UPDATE operations SET status='reconciled_unliked'")));
+ assert.ok(!DB.calls.some(x=>x.sql.includes("DELETE FROM operations")));
 });
 test("network ambiguity halts further interactions",async()=>{
  const DB=fixture();DB.proposal.body_hash=await sha256("like\u0000"+DB.proposal.target+"\u0000");
