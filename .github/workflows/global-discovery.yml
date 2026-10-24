@@ -6,6 +6,9 @@ on:
   push:
     branches: [master]
     paths:
+      - "worker/**"
+      - "scripts/run_global_step.py"
+      - "tests/**"
       - ".github/workflows/global-discovery.yml"
 permissions:
   contents: read
@@ -13,118 +16,40 @@ concurrency:
   group: substack-private-global-post-discovery
   cancel-in-progress: false
 jobs:
-  global:
+  validate-and-deploy:
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 7
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v5
-      - name: Test and deploy semantic-review Worker changes (push only)
-        if: github.event_name == 'push'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Test all read-only discovery and two-stage AI logic
         shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npm install --prefix worker --no-audit --no-fund
+          node --test tests/*.test.mjs
+          python3 -m unittest discover -s tests -q
+          (cd worker && npx wrangler deploy --dry-run --outdir=./.wrangler-verify)
+      - name: Deploy the fully tested cloud Worker
+        working-directory: worker
         run: |
           set -euo pipefail
           test -n "${CLOUDFLARE_API_TOKEN:-}"
           test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
-          npm install --prefix worker --no-audit --no-fund
-          node --test tests/*.test.mjs
-          python3 -m unittest discover -s tests -q
-          (cd worker && npx wrangler deploy)
-      - name: Check repaired semantic screening against Cloudflare private queue (push only)
-        if: github.event_name == 'push'
-        env:
-          BRIDGE_URL: ${{ vars.BRIDGE_URL }}
-          BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json,os,sys,urllib.error,urllib.request
-          url=os.environ.get('BRIDGE_URL','').rstrip('/')+'/v1/global/screen'
-          key=os.environ.get('BRIDGE_KEY','')
-          if not url.startswith('https://') or not key:sys.exit('Private gateway configuration missing')
-          req=urllib.request.Request(url,method='POST',data=b'{}',headers={'Authorization':'Bearer '+key,'Content-Type':'application/json','User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36','Accept':'application/json'})
-          try:
-              with urllib.request.urlopen(req,timeout=90) as resp:
-                  status=resp.status
-                  data=json.load(resp)
-          except urllib.error.HTTPError as exc:
-              status=exc.code
-              try:data=json.load(exc)
-              except Exception:data={}
-          except Exception:
-              print('Private AI screening transport failed');sys.exit(1)
-          safe={'ai_inference_failed','invalid_ai_verdict','unavailable_or_daily_cap'}
-          reason=data.get('reason')
-          reason=reason if reason in safe else 'none_or_unknown'
-          ok=status==200 and data.get('ok') is True and data.get('publication_performed') is False and isinstance(data.get('reviewed'),int) and (data.get('reviewed')>=1 or data.get('reason') in ('no_pending_candidates','unavailable_or_daily_cap'))
-          state="PASS" if ok and data.get('reviewed',0)>=1 else "DEFERRED" if ok else "FAIL"
-          print('Live private semantic screening: '+state+'; HTTP '+str(status)+'; reviewed='+str(data.get('reviewed',0))+'; category='+reason)
-          if reason=='unavailable_or_daily_cap':print('WARNING: AI daily cap deferred live review; this does not establish successful AI screening')
-          sys.exit(0 if ok else 1)
-          PY
-      - name: Report private quota aggregates, never search targets (push only)
-        if: github.event_name == 'push'
-        env:
-          BRIDGE_URL: ${{ vars.BRIDGE_URL }}
-          BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json,os,urllib.request
-          request=urllib.request.Request(os.environ["BRIDGE_URL"].rstrip("/")+"/v1/status",headers={"Authorization":"Bearer "+os.environ["BRIDGE_KEY"],"User-Agent":"Mozilla/5.0","Accept":"application/json"})
-          with urllib.request.urlopen(request,timeout=40) as response: data=json.load(response)
-          print("Private cloud Browser Run actions 24h:",data.get("browser_requests_24h","unknown"))
-          print("Private cloud Browser Run accounted ms 24h:",data.get("browser_ms_24h","unknown"))
-          print("Private global posts stored:",data.get("global_posts","unknown"))
-          print("Private full articles read:",data.get("global_full_reads","unknown"))
-          print("Private first-pass reviewed:",data.get("global_semantic_reviewed","unknown"))
-          PY
-      - name: Live two-stage deep-review verification (push only, read-only)
-        if: github.event_name == 'push'
-        env:
-          BRIDGE_URL: ${{ vars.BRIDGE_URL }}
-          BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json,os,sys,urllib.request,urllib.error
-          url=os.environ["BRIDGE_URL"].rstrip("/")+"/v1/global/deep-review"
-          req=urllib.request.Request(url,data=b'{}',method='POST',headers={"Authorization":"Bearer "+os.environ["BRIDGE_KEY"],"Content-Type":"application/json","Accept":"application/json","User-Agent":"Mozilla/5.0"})
-          try:
-              with urllib.request.urlopen(req,timeout=100) as response:
-                  code=response.status;result=json.load(response)
-          except urllib.error.HTTPError as err:
-              code=err.code
-              try:result=json.load(err)
-              except Exception:result={}
-          except Exception:
-              print("Stage 2 transport error; no public action.");sys.exit(1)
-          reason=result.get("reason")
-          reasons={"no_qualified_candidate","ai_daily_cap","ai_not_configured","deep_ai_inference_failed","invalid_deep_verdict"}
-          safe=reason if reason in reasons else "none"
-          ok=code==200 and result.get("ok") is True and result.get("publication_performed") is False
-          actual=int(result.get("reviewed",0)) if ok else 0
-          state="PASS" if actual else "DEFERRED" if ok else "FAIL"
-          print("Stage 2 live full-article reasoning: "+state+"; reviewed="+str(actual)+"; reason="+safe+"; HTTP "+str(code))
-          print("Public write: no")
-          sys.exit(0 if ok else 1)
-          PY
-      - name: Test complete scheduled global search-read-review pipeline (push only)
-        if: github.event_name == 'push'
-        env:
-          BRIDGE_URL: ${{ vars.BRIDGE_URL }}
-          BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 -m scripts.run_global_step
-      - name: Run full scheduled global article discovery
-        if: github.event_name != 'push'
+          npx wrangler deploy
+  discover:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run full cloud global search, article read, and two-stage AI pipeline
         env:
           BRIDGE_URL: ${{ vars.BRIDGE_URL }}
           BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
