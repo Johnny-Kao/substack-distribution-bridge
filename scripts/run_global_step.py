@@ -58,7 +58,11 @@ def execute():
             print("Private semantic screening unavailable.", file=sys.stderr)
             return 1
         if screened.get("ok") is not True:
-            print("Private semantic screening rejected the result.", file=sys.stderr)
+            # Only log a fixed allowlisted error category. Never expose the
+            # original article, subject, author, prompt or model response.
+            reason = screened.get("reason")
+            safe = reason if reason in ("invalid_ai_verdict", "invalid_ai_json", "ai_inference_failed", "invalid_ai_result") else "unknown_screening_failure"
+            print("Private semantic screening failed; category="+safe+".", file=sys.stderr)
             return 1
         count = int(screened.get("reviewed", 0))
         reviewed += count
