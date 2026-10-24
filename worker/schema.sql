@@ -73,3 +73,24 @@ CREATE TABLE IF NOT EXISTS interaction_feedback (
 );
 CREATE INDEX IF NOT EXISTS idx_feedback_candidate_time ON interaction_feedback(candidate_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_feedback_recent ON interaction_feedback(created_at DESC,choice);
+
+-- Reusable ChatGPT -> GitHub OIDC -> private Cloudflare D1 owner approval.
+CREATE TABLE IF NOT EXISTS approved_external_posts (
+ url TEXT PRIMARY KEY,
+ post_id INTEGER NOT NULL,
+ imported_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS owner_choice_batches (
+ batch_id TEXT PRIMARY KEY,
+ selection_hash TEXT NOT NULL,
+ item_count INTEGER NOT NULL,
+ created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS owner_batch_items (
+ batch_id TEXT NOT NULL,
+ post_id INTEGER NOT NULL,
+ url TEXT NOT NULL,
+ choice TEXT NOT NULL CHECK(choice IN ('like','skip')),
+ PRIMARY KEY(batch_id,post_id)
+);
+CREATE INDEX IF NOT EXISTS idx_owner_batch_items_url ON owner_batch_items(url);
