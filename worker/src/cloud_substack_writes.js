@@ -35,8 +35,8 @@ export async function runAuthorizedPostAction(env,{target,kind,body="",postId,ap
       if(!response.ok)return {ok:false,status:response.status};
       const data=await response.json();
       const post=data?.post||data;
-      return {ok:post?.id===args.id,id:post?.id,reaction:post?.reaction===true,commentCount:Number(post?.comment_count)||0};
-    },{id:postId});
+      return {ok:post?.id===args.id&&post?.canonical_url===args.url,id:post?.id,reaction:post?.reaction===true,commentCount:Number(post?.comment_count)||0};
+    },{id:postId,url:loc.url});
     const before=await verify();
     if(!before.ok)throw Error("unverified_account_or_post");
     const comments=()=>page.evaluate(async id=>{
