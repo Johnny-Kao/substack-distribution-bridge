@@ -37,11 +37,11 @@ def execute():
           ", new="+str(int(result.get("new_posts",0)))+
           ", review candidates="+str(int(result.get("prequalified",0)))+
           ", total stored="+str(int(result.get("stored_total",0)))+".")
-    # Read two articles per run when budget allows. Cloudflare Browser Run
+    # Target up to TEN full articles per run; budget gating may defer earlier. Cloudflare Browser Run
     # calls share a 15-second D1 pacing gate; each read is spaced explicitly.
     # A quota deferral stops the batch without losing the completed search.
     full_reads = 0
-    for _ in range(2):
+    for _ in range(10):
         time.sleep(17)
         try:
             article = get_json(base+"/v1/global/read", headers, payload={}, timeout=55)
@@ -102,6 +102,26 @@ def execute():
         why=deep.get("reason")
         safe=why if why in ("no_qualified_candidate","ai_daily_cap","ai_not_configured") else "unknown"
         print("Deep semantic review deferred; category="+safe+".")
+    # Thread context and comment drafting happen after deep review and are
+    # independent private steps. They cannot approve or publish anything.
+    for route, metric in (("read-discussion", "read"), ("comment-draft", "drafted")):
+        try:
+            follow=get_json(base+"/v1/global/"+route,headers,payload={},timeout=100)
+        except HTTPError as error:
+            if error.code==429:
+                print("Private "+route+" deferred by browser/AI quota.")
+                continue
+            print("Private "+route+" unavailable; HTTP "+str(error.code),file=sys.stderr)
+            return 1
+        except (URLError,TimeoutError,ValueError):
+            print("Private "+route+" transport error.",file=sys.stderr)
+            return 1
+        if follow.get("ok") is not True:
+            reason=follow.get("reason","unknown")
+            safe=reason if reason in ("browser_quota","thread_transport","thread_unavailable","comment_ai_inference_failed","invalid_comment_draft","invalid_discussion_context") else "unknown"
+            print("Private "+route+" failed; reason="+safe,file=sys.stderr)
+            return 1
+        print("Private "+route+" completed; "+metric+"="+str(int(follow.get(metric,0)))+".")
     return 0
 
 if __name__=="__main__":
