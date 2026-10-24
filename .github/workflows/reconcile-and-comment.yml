@@ -1,4 +1,4 @@
-name: Complete owner-approved comment with reserved free browser budget
+name: Verify and publish approved comment within reserved browser budget
 on:
   push:
     branches: [master]
