@@ -40,7 +40,6 @@ export async function verifyOwnerWorkflowJwt(jwt,{
     claims.repository!==OWNER_OIDC.repository||
     claims.workflow_ref!==OWNER_OIDC.workflow_ref||
     claims.event_name!=="push"||claims.ref!==OWNER_OIDC.ref||
-    !str(claims.sub).startsWith("repo:"+OWNER_OIDC.repository+":")||
     !Number.isSafeInteger(claims.iat)||!Number.isSafeInteger(claims.nbf)||
     !Number.isSafeInteger(claims.exp)||claims.nbf>now+30||claims.iat>now+30||
     claims.exp<=now||claims.exp>now+600||now-claims.iat>300)
