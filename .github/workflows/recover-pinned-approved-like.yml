@@ -1,0 +1,74 @@
+name: Recover exact owner-approved Like after readback
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/recover-pinned-approved-like.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: substack-approved-outbox-clock
+  cancel-in-progress: false
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      BRIDGE_URL: ${{ vars.BRIDGE_URL }}
+      BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Recheck current Like under exact encrypted owner authorization
+        id: recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,urllib.request,urllib.error,sys
+          path='private_envelopes/approved_fo_wm_pb_likes_2026-10-25.enc.json'
+          with open(path,'rb') as f: payload=f.read()
+          if len(payload)>10000: raise SystemExit("Unacceptable encrypted envelope size")
+          req=urllib.request.Request(os.environ['BRIDGE_URL'].rstrip('/')+'/v1/global/recover-pinned-approved-like',
+              method='POST',data=payload,headers={
+                  'Authorization':'Bearer '+os.environ['BRIDGE_KEY'],
+                  'Content-Type':'application/json','User-Agent':'Mozilla/5.0'})
+          try:
+              with urllib.request.urlopen(req,timeout=115) as result:
+                  status=result.status;data=json.load(result)
+          except urllib.error.HTTPError as exc:
+              status=exc.code
+              try:data=json.load(exc)
+              except Exception:data={}
+          outcome=data.get('status','unknown')
+          allowed={'confirmed_existing_like_and_resumed','reconfirmed_unliked_requeued_once','browser_quota_deferred'}
+          safe=outcome if outcome in allowed else 'requires_review'
+          good=status==200 and data.get('ok') is True and outcome in allowed
+          print('Pinned Like recovery: '+('PASS' if good else 'FAIL')+'; state='+safe+'; HTTP '+str(status))
+          print('No private article names, target URLs, account details or secrets logged')
+          if not good:sys.exit(1)
+          with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as out:
+              out.write('can_dispatch='+str(outcome in {'confirmed_existing_like_and_resumed','reconfirmed_unliked_requeued_once'}).lower()+'\n')
+          PY
+      - name: Drain only previously owner-approved queued Likes, max 20
+        if: steps.recovery.outputs.can_dispatch == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m scripts.dispatch_approved_batch
+      - name: Read back private D1 aggregate counts, not target details
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,urllib.request
+          req=urllib.request.Request(os.environ['BRIDGE_URL'].rstrip('/')+'/v1/status',
+               headers={'Authorization':'Bearer '+os.environ['BRIDGE_KEY'],'User-Agent':'Mozilla/5.0'})
+          with urllib.request.urlopen(req,timeout=25) as r: d=json.load(r)
+          a=d.get('action_outbox',{})
+          print('D1 outbox: completed='+str(a.get('completed'))+', approved='+str(a.get('ready_to_execute'))+
+                ', uncertain='+str(a.get('needs_reconciliation'))+', executing='+str(a.get('executing'))+
+                ', rejected='+str(a.get('rejected')))
+          print('No private target identities disclosed in GitHub logs')
+          PY
