@@ -3,6 +3,10 @@ on:
   schedule:
     - cron: '53 */3 * * *'
   workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/approved-action-dispatch.yml"
 permissions:
   contents: read
 concurrency:
