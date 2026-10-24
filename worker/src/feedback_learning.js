@@ -19,8 +19,10 @@ export function makePreferenceContext(items){
  for(const item of items||[]){
   if(!CHOICES.has(item.choice)||!["owner_choice","owner_approval","owner_rejection"].includes(item.source))continue;
   const title=String(item.title||"").replace(/[\r\n\x00-\x1f]+/g," ").slice(0,125);
-  if(!title||by[item.choice].includes(title)||by[item.choice].length>=5)continue;
-  by[item.choice].push(title);
+  if(!title||by[item.choice].some(v=>v.startsWith(title))||by[item.choice].length>=5)continue;
+  const reason=String(item.reason||"").replace(/[\\r\\n\\x00-\\x1f]+/g," ").slice(0,170);
+  const selected=String(item.actual_body||"").replace(/[\\r\\n\\x00-\\x1f]+/g," ").slice(0,220);
+  by[item.choice].push(title+(reason?" (owner rationale: "+reason+")":"")+(item.choice==="comment"&&selected?" (approved writing example: "+selected+")":""));
  }
  if(!Object.values(by).some(a=>a.length))return "";
  return [
@@ -32,7 +34,7 @@ export function makePreferenceContext(items){
  ].join("\n");
 }
 export async function preferenceContext(env){
- const rows=await env.DB.prepare("SELECT f.choice,f.source,c.title FROM interaction_feedback f JOIN candidates c ON c.id=f.candidate_id WHERE f.source IN ('owner_choice','owner_approval','owner_rejection') ORDER BY f.created_at DESC LIMIT 45").all();
+ const rows=await env.DB.prepare("SELECT f.choice,f.source,f.reason,f.actual_body,c.title FROM interaction_feedback f JOIN candidates c ON c.id=f.candidate_id WHERE f.source IN ('owner_choice','owner_approval','owner_rejection') ORDER BY f.created_at DESC LIMIT 45").all();
  return makePreferenceContext(rows.results||[]);
 }
 export async function feedbackStats(env){
