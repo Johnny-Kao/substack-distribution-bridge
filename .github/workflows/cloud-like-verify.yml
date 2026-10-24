@@ -85,3 +85,23 @@ jobs:
               print("Cloud verification failed; check private Worker logs (no target information exposed)")
               sys.exit(1)
           PY
+      - name: Preflight approved comment without posting
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 17
+          status=$(curl --retry 0 --silent --show-error --max-time 90 -o /tmp/cloud-comment-preflight.json -w '%{http_code}' \
+            -X POST "${BRIDGE_URL%/}/v1/global/preflight-approved-comment" \
+            -H "Authorization: Bearer $BRIDGE_KEY" -H 'Content-Type: application/json' \
+            --data-binary @private_envelopes/approved_comment.enc.json)
+          python3 - "$status" <<'PY'
+          import sys,json
+          status=int(sys.argv[1])
+          try: data=json.load(open('/tmp/cloud-comment-preflight.json',encoding='utf-8'))
+          except Exception: data={}
+          passed=status==200 and data.get('ok') is True and data.get('verified') is True and data.get('status') in ('comment_preflight_ready','already_commented')
+          print('Authenticated comment preflight: '+('PASS' if passed else 'FAIL')+', HTTP '+str(status))
+          if not passed: print('Failure stage: '+str(data.get('code',data.get('error','unknown')))[:65])
+          print('No public comment was created by this preflight')
+          sys.exit(0 if passed else 1)
+          PY
