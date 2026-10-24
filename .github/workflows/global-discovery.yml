@@ -45,7 +45,7 @@ jobs:
           url=os.environ.get('BRIDGE_URL','').rstrip('/')+'/v1/global/screen'
           key=os.environ.get('BRIDGE_KEY','')
           if not url.startswith('https://') or not key:sys.exit('Private gateway configuration missing')
-          req=urllib.request.Request(url,method='POST',data=b'{}',headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
+          req=urllib.request.Request(url,method='POST',data=b'{}',headers={'Authorization':'Bearer '+key,'Content-Type':'application/json','User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36','Accept':'application/json'})
           try:
               with urllib.request.urlopen(req,timeout=90) as resp:
                   status=resp.status
