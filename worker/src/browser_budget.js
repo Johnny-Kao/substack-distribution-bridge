@@ -1,6 +1,11 @@
 // Shared Cloudflare Browser Run Free budget and pacing across RSS and subject search.
 // Reserve atomically in D1 before every Quick Action. No paid overflow paths.
 export const MAX_ACTIONS_DAY = 38;
+// Reserve two additional actions ONLY for an exact, already owner-approved
+// comment: prior-state reconciliation and one attempt with its own readback.
+// Cloudflare Free bills browser minutes (10 min/day), not 38 actions/day.
+// The stricter existing 390s rolling-minute guard remains unchanged.
+export const MAX_APPROVED_ACTIONS_DAY = 40;
 export const MAX_BROWSER_MS_DAY = 390000;
 export const MIN_SECONDS_BETWEEN_ACTIONS = 15;
 
@@ -12,7 +17,7 @@ export async function reserveBrowserAction(db,kind){
   WHERE (SELECT COUNT(*) FROM browser_requests WHERE created_at >= datetime('now','-1 day')) < ?
    AND (SELECT COALESCE(SUM(browser_ms),0) FROM browser_requests WHERE created_at >= datetime('now','-1 day')) < ?
    AND NOT EXISTS(SELECT 1 FROM browser_requests WHERE created_at > datetime('now','-15 seconds'))
- `).bind(id,kind,MAX_ACTIONS_DAY,MAX_BROWSER_MS_DAY).run();
+ `).bind(id,kind,limit,MAX_BROWSER_MS_DAY).run();
  if(!result.meta?.changes)return null;
  return id;
 }
