@@ -10,6 +10,8 @@ Private targeting weights, source lists, draft histories, engagement evidence, r
 
 ## Content and quality
 - Shortlist high-value articles based on substance, network relevance, recency and meaningful discussion. Keywords are an initial filter, not proof of quality.
+- Exclude paywalled investor/contact-list products, bulk FO contact databases, and event-only announcement or registration pages from article engagement shortlists. Prefer actual substantive editorial posts; paid substantive analysis may still qualify if its content can be reviewed.
+- Present every candidate with its full canonical URL visibly displayed. In the owner review interface, initialize all candidates to a **draft Like selection**, allowing individual Skip changes. A preselected UI choice is not authorization; submit nothing to D1 until the owner explicitly confirms the final batch. Never auto-approve from a default UI state.
 - Store title, source, original URL, argument excerpt, scoring evidence, freshness, and proposed engagement type for each candidate in private D1. Candidate status does not grant posting permission.
 - Explore multiple related query variants and result pages per subject, deduplicate publications across terms, then rank by recent relevant posts, discussion quality and meaningful engagement opportunity. Publication counts alone are not success, and M5 research is not cloud acceptance.
 - Read the complete original article and existing discussion before proposing any comment.
