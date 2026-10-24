@@ -1,0 +1,50 @@
+name: Reconcile orphaned approved Like (read-only Substack check)
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/reconcile-orphan-like.yml"
+permissions:
+  contents: read
+concurrency:
+  group: private-orphan-like-reconciliation
+  cancel-in-progress: false
+jobs:
+  reconcile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    env:
+      BRIDGE_URL: ${{ vars.BRIDGE_URL }}
+      BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
+    steps:
+      - name: Verify authenticated current Like state, never POST a reaction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,urllib.request,urllib.error,sys
+          base=os.environ['BRIDGE_URL'].rstrip('/')
+          req=urllib.request.Request(base+'/v1/global/reconcile-orphan-like',method='POST',data=b'{}',
+              headers={'Authorization':'Bearer '+os.environ['BRIDGE_KEY'],
+                  'Accept':'application/json','Content-Type':'application/json','User-Agent':'Mozilla/5.0'})
+          try:
+              with urllib.request.urlopen(req,timeout=112) as response:
+                  code=response.status
+                  data=json.load(response)
+          except urllib.error.HTTPError as e:
+              code=e.code
+              try:data=json.load(e)
+              except Exception:data={}
+          safe={'liked_confirmed_after_crash','nothing_to_reconcile',
+                'browser_quota_deferred','still_in_flight',
+                'needs_manual_reconciliation','multiple_orphans_manual_review',
+                'orphan_identity_invalid','readback_unverified'}
+          status=data.get('status','unknown')
+          status=status if status in safe else 'unknown'
+          good=code==200 and data.get('ok') is True and status in safe
+          print('Orphan Like read-only readback: '+('PASS' if good else 'REQUIRES_REVIEW')+
+                '; status='+status+'; HTTP '+str(code))
+          print('No Substack Like or Comment is sent, and no post targets are logged')
+          sys.exit(0 if good else 1)
+          PY
