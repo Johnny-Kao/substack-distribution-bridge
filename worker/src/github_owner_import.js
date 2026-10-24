@@ -2,7 +2,7 @@
 // Never accepts plaintext article targets over public GitHub or BRIDGE_KEY alone.
 import {verifyOwnerWorkflowJwt} from "./github_owner_oidc.js";
 import {decryptApprovedEnvelope} from "./sealed_like_batch.js";
-import {enqueueOwnerChoices} from "./owner_batch_api.js";
+import {enqueueOwnerChoices,validateOwnerSelection} from "./owner_batch_api.js";
 export async function importOwnerChoicesFromGithub(env,request,{
  verify=verifyOwnerWorkflowJwt,
  decrypt=decryptApprovedEnvelope,
@@ -22,5 +22,10 @@ export async function importOwnerChoicesFromGithub(env,request,{
   if(decoded.byteLength>22000)throw Error("too_large");
   choices=JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(decoded));
  }catch{return {ok:false,status:400,error:"invalid_encrypted_owner_choices",publication_performed:false};}
+ if(choices?.validation_only===true){
+  const parsed=validateOwnerSelection(choices);
+  return parsed?{ok:true,validation_only:true,count:parsed.items.length,publication_performed:false,persisted:false}:
+   {ok:false,status:400,error:"invalid_encrypted_owner_choices",publication_performed:false};
+ }
  return enqueue(env,choices);
 }
