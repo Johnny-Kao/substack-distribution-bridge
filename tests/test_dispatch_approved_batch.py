@@ -48,6 +48,29 @@ class ApprovedBatchTest(unittest.TestCase):
             dispatch("https://bridge.example","private-key",transport=fake,sleep=lambda _:None)
         self.assertEqual(steps,[0])
 
+    def test_http_503_exposes_only_safe_status_and_step(self):
+        import io,urllib.error
+        from unittest.mock import patch
+        from scripts.dispatch_approved_batch import submit,DispatchHTTPError
+        response=io.BytesIO(b'{"ok":false,"status":"ambiguous_write_halted","target":"PRIVATE"}')
+        error=urllib.error.HTTPError("https://bridge.example/v1/global/dispatch-approved",503,"Server Error",None,response)
+        with patch("scripts.dispatch_approved_batch.urllib.request.urlopen",side_effect=error):
+            with self.assertRaises(DispatchHTTPError) as context:
+                submit("https://bridge.example","nonpublic",7)
+        self.assertEqual(context.exception.step,7)
+        self.assertEqual(context.exception.code,503)
+        self.assertEqual(context.exception.state,"ambiguous_write_halted")
+        self.assertNotIn("PRIVATE",str(context.exception))
+
+    def test_reconciliation_state_stops_batch_without_retry(self):
+        calls=[]
+        def fake(base,key,step):
+            calls.append(step)
+            return {"ok":True,"status":"needs_reconciliation"}
+        result=dispatch("https://bridge.example","secret",transport=fake,sleep=lambda _:None)
+        self.assertEqual(calls,[0])
+        self.assertEqual(result["needs_reconciliation"],1)
+
     def test_no_plaintext_or_missing_key_from_caller(self):
         with self.assertRaises(ValueError):
             dispatch("http://unsafe.local","secret",transport=lambda *x:None,sleep=lambda _:None)
