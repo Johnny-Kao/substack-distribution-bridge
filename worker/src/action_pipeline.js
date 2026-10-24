@@ -26,7 +26,7 @@ export async function stageApprovedDecisionCandidate(env,{id,kind,body="",discus
  const target=await env.DB.prepare("SELECT c.id,c.url,g.id AS post_id,t.score,t.evidence_signals, (SELECT COUNT(*) FROM operations o WHERE o.target=c.url AND o.kind=? AND o.status IN ('unknown','succeeded','executing')) AS existing_actions FROM engagement_targets t JOIN candidates c ON c.id=t.id JOIN global_posts g ON g.url=c.url WHERE t.id=? AND t.review_state='semantically_reviewed' LIMIT 1").bind(kind,id).first();
  if(!target)return {ok:false,error:"reviewed_candidate_not_found",status:404};
  let signals;try{signals=JSON.parse(target.evidence_signals)}catch{return {ok:false,error:"invalid_private_evidence",status:409};}
- if(!signals?.deep_review||signals?.deep_review?.decision!==(kind==="like"?"like_review":"comment_review")||target.score<60)return {ok:false,error:"no_qualifying_deep_decision",status:409};
+ if(!signals?.deep_review||!["like_review","comment_review"].includes(signals.deep_review.decision)||target.score<60)return {ok:false,error:"no_qualifying_deep_decision",status:409};
  if(kind==="comment"&&signals?.discussion?.status!=="sampled")return {ok:false,error:"verified_discussion_context_required",status:409};
  if(target.existing_actions)return {ok:false,error:"previous_interaction_or_uncertain",status:409};
  if(!Number.isSafeInteger(target.post_id)||target.post_id<=0)return {ok:false,error:"invalid_post_id",status:409};
