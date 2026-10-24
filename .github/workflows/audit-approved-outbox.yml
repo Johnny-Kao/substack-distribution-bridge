@@ -28,5 +28,8 @@ jobs:
           for k in ('total','ready_to_execute','completed','needs_reconciliation','awaiting_approval'):
               if not isinstance(q.get(k),int): raise SystemExit('Missing private outbox aggregate')
           print('D1 outbox totals: total='+str(q['total'])+', approved='+str(q['ready_to_execute'])+', completed='+str(q['completed'])+', uncertain='+str(q['needs_reconciliation'])+', unapproved='+str(q['awaiting_approval']))
+          jobs=[str(j.get('status','unknown')) for j in d.get('jobs',[]) if j.get('kind')=='approved_dispatch'][:10]
+          print('Recent D1 dispatch statuses (newest first): '+(','.join(jobs) if jobs else 'none'))
+          print('Browser requests last 24h: '+str(d.get('browser_requests_24h','unknown'))+'; accounted browser ms: '+str(d.get('browser_ms_24h','unknown')))
           print('Read-only audit, no targets, no private text, no Substack writes')
           PY
