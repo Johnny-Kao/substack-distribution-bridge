@@ -13,3 +13,7 @@ binding = "AI"
 
 [browser]
 binding = "BROWSER"
+
+# Runs a separate owner-approved action outbox. No discovery or auto approval.
+[triggers]
+crons = ["17 * * * *"]
