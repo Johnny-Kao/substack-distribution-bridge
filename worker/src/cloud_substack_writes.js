@@ -10,7 +10,7 @@ export function parsePostTarget(raw){
   if(!m||!/^\/p\/[a-z0-9-]{1,200}\/?$/.test(url.pathname))return null;
   return {host:url.hostname,subdomain:m[1],url:url.origin+url.pathname.replace(/\/$/,"")};
 }
-export async function runAuthorizedPostAction(env,{target,kind,body="",postId,approved=false}){
+export async function runAuthorizedPostAction(env,{target,kind,body="",postId,approved=false,preflightOnly=false}){
   const loc=parsePostTarget(target);
   if(!approved||!loc||!["like","comment"].includes(kind)||!Number.isSafeInteger(postId)||postId<1)throw Error("invalid_or_unapproved_action");
   // Match the verified local Substack reaction contract; reject unvalidated Comment transport.
@@ -62,6 +62,7 @@ export async function runAuthorizedPostAction(env,{target,kind,body="",postId,ap
       if(!pre.ok||!pre.data)throw Error("pre_comment_readback_failed");
       const found=exact(pre.data);
       if(found)return {ok:true,status:"already_commented",verified:true,public_id:String(found),publication_performed:false};
+      if(preflightOnly)return {ok:true,status:"comment_preflight_ready",verified:true,publication_performed:false};
     }
     if(kind==="like"&&before.reaction)return {ok:true,status:"already_liked",verified:true,publication_performed:false};
     if(kind==="comment"&&(!body.trim()||body.length>750))throw Error("invalid_comment");
