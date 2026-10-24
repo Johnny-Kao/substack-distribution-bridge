@@ -24,6 +24,7 @@ export async function screenGlobalCandidates(env) {
  const used=await env.DB.prepare("SELECT COUNT(*) AS n FROM ai_usage WHERE created_at>=datetime('now','-1 day')").first();
  if(!env.AI||Number(used?.n||0)>=8)return {ok:true,reviewed:0,reason:"unavailable_or_daily_cap",publication_performed:false};
  const queue=await env.DB.prepare("SELECT t.id,c.title,t.evidence_excerpt FROM engagement_targets t JOIN candidates c ON c.id=t.id WHERE t.review_state='pending_semantic_review' AND json_extract(t.evidence_signals,'$.origin')='global_post_search' AND json_extract(t.evidence_signals,'$.full_read')=1 ORDER BY t.score DESC LIMIT 1").all();
+ if(!(queue.results||[]).length)return {ok:true,reviewed:0,reason:"no_pending_candidates",publication_performed:false};
  let reviewed=0;
  for(const candidate of queue.results||[]){
   const instructions=[
