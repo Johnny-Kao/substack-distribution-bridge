@@ -1,0 +1,32 @@
+name: Audit approved Substack queue (read only)
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/audit-approved-outbox.yml"
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    env:
+      BRIDGE_URL: ${{ vars.BRIDGE_URL }}
+      BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
+    steps:
+      - name: Read private aggregate D1 outbox status only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,urllib.request
+          base=os.environ['BRIDGE_URL'].rstrip('/')
+          req=urllib.request.Request(base+'/v1/status',headers={'Authorization':'Bearer '+os.environ['BRIDGE_KEY'],'Accept':'application/json','User-Agent':'Mozilla/5.0'})
+          with urllib.request.urlopen(req,timeout=30) as r: d=json.load(r)
+          q=d.get('action_outbox',{})
+          for k in ('total','ready_to_execute','completed','needs_reconciliation','awaiting_approval'):
+              if not isinstance(q.get(k),int): raise SystemExit('Missing private outbox aggregate')
+          print('D1 outbox totals: total='+str(q['total'])+', approved='+str(q['ready_to_execute'])+', completed='+str(q['completed'])+', uncertain='+str(q['needs_reconciliation'])+', unapproved='+str(q['awaiting_approval']))
+          print('Read-only audit, no targets, no private text, no Substack writes')
+          PY
