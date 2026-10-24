@@ -137,7 +137,7 @@ test("previously succeeded Like is not reapproved even when proposal state is st
  const selection=make([{...items(1)[0],choice:"like"}]);
  const {sha256}=await import("../worker/src/action_pipeline.js");
  const target=selection.items[0].url;
- const existing={id:"existing-like-proposal",state:"proposed",body_hash:await sha256("like\\u0000"+target+"\\u0000")};
+ const existing={id:"existing-like-proposal",state:"proposed",body_hash:await sha256("like\u0000"+target+"\u0000")};
  const DB=fakeDB({existing,priorWrite:{status:"succeeded"}});
  const receipt=await enqueueOwnerChoices({DB},selection);
  assert.equal(receipt.ok,true);
