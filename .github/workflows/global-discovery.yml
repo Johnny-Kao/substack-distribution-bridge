@@ -36,12 +36,6 @@ jobs:
           node --test tests/*.test.mjs
           python3 -m unittest discover -s tests -q
           (cd worker && npx wrangler deploy --dry-run --outdir=./.wrangler-verify)
-      - name: Apply idempotent private owner-feedback migration
-        working-directory: worker
-        shell: bash
-        run: |
-          set -euo pipefail
-          npx wrangler d1 execute substack-distribution-private --remote --file=./migration_feedback.sql
       - name: Deploy the fully tested cloud Worker
         working-directory: worker
         run: |
@@ -49,6 +43,21 @@ jobs:
           test -n "${CLOUDFLARE_API_TOKEN:-}"
           test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
           npx wrangler deploy
+      - name: Initialize private feedback schema via Worker binding
+        env:
+          BRIDGE_URL: ${{ vars.BRIDGE_URL }}
+          BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,json,urllib.request
+          base=os.environ['BRIDGE_URL'].rstrip('/')
+          req=urllib.request.Request(base+'/v1/global/setup-feedback',method='POST',data=b'{}',headers={'Authorization':'Bearer '+os.environ['BRIDGE_KEY'],'Content-Type':'application/json','User-Agent':'Mozilla/5.0'})
+          with urllib.request.urlopen(req,timeout=55) as result:data=json.load(result)
+          if data.get('ok') is not True or data.get('ready') is not True:raise SystemExit('D1 feedback schema not verified')
+          print('Private feedback schema verified; previously recorded events='+str(data.get('existing_feedback_count',0)))
+          PY
   discover:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
